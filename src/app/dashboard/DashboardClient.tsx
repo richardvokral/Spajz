@@ -1,24 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import type {
-  LastOrder,
-  LastOrderResponse,
-  OrderLineItem,
-  RohlikDebug,
-} from "@/lib/rohlik/types";
-import {
-  addItemsToPantry,
-  clearPantry,
-  isOrderImported,
-  loadPantry,
-  markOrderImported,
-  type Pantry,
-} from "@/lib/pantry/storage";
+import { useCallback, useEffect, useState } from "react";
+import type { RohlikDebug } from "@/lib/rohlik/types";
 
-interface Selection {
-  checked: boolean;
-  qty: number;
+interface PantryRow {
+  category: string | null;
+  quantity: string;
+  unit: string | null;
+  lastBought: string | null;
 }
 
 const STATUS_TEXT: Record<string, string> = {
@@ -46,40 +35,52 @@ export default function DashboardClient({
 }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const [order, setOrder] = useState<LastOrder | null>(null);
-  const [alreadyImported, setAlreadyImported] = useState(false);
-  const [selection, setSelection] = useState<Selection[]>([]);
+  const [note, setNote] = useState<string | null>(null);
   const [debug, setDebug] = useState<RohlikDebug | null>(null);
   const [copied, setCopied] = useState(false);
 
-  const [pantry, setPantry] = useState<Pantry>({});
+  const [pantry, setPantry] = useState<PantryRow[]>([]);
+  const [pantryReady, setPantryReady] = useState(false);
+  const [dbConfigured, setDbConfigured] = useState(true);
+
+  const loadPantry = useCallback(async () => {
+    try {
+      const res = await fetch("/api/pantry");
+      const data = await res.json();
+      setDbConfigured(Boolean(data.dbConfigured));
+      setPantry(Array.isArray(data.items) ? data.items : []);
+    } catch {
+      setPantry([]);
+    } finally {
+      setPantryReady(true);
+    }
+  }, []);
 
   useEffect(() => {
-    setPantry(loadPantry());
-  }, []);
+    loadPantry();
+  }, [loadPantry]);
 
   async function handleImport() {
     setLoading(true);
     setError(null);
-    setOrder(null);
+    setNote(null);
     setDebug(null);
-
     try {
-      const res = await fetch("/api/rohlik/last-order", { method: "POST" });
-      const data = (await res.json()) as LastOrderResponse;
+      const res = await fetch("/api/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind: "last" }),
+      });
+      const data = await res.json();
       setDebug(data.debug ?? null);
-
-      if (!data.ok) {
-        setError(data.error);
+      if (data.ok === false) {
+        setError(data.error ?? "Import failed.");
         return;
       }
-
-      setOrder(data.order);
-      setAlreadyImported(isOrderImported(data.order.orderId));
-      setSelection(
-        data.order.items.map((it) => ({ checked: true, qty: it.quantity }))
+      setNote(
+        `Imported ${data.ordersImported} order(s), ${data.itemsImported} item(s).`
       );
+      await loadPantry();
     } catch {
       setError("Network error talking to the server.");
     } finally {
@@ -87,77 +88,34 @@ export default function DashboardClient({
     }
   }
 
-  function toggle(index: number, checked: boolean) {
-    setSelection((prev) =>
-      prev.map((s, i) => (i === index ? { ...s, checked } : s))
-    );
-  }
-
-  function setQty(index: number, qty: number) {
-    setSelection((prev) => prev.map((s, i) => (i === index ? { ...s, qty } : s)));
-  }
-
-  function handleAddToPantry() {
-    if (!order) return;
-
-    const items: OrderLineItem[] = order.items
-      .map((it, i) => ({ ...it, quantity: selection[i]?.qty ?? it.quantity }))
-      .filter((_, i) => selection[i]?.checked);
-
-    const updated = addItemsToPantry(items, order.orderedAt);
-    markOrderImported(order.orderId);
-    setPantry(updated);
-    setAlreadyImported(true);
-  }
-
-  function handleClear() {
-    if (!confirm("Clear the whole pantry and import history?")) return;
-    clearPantry();
-    setPantry({});
-    setAlreadyImported(false);
-  }
-
-  const pantryRows = Object.values(pantry).sort((a, b) =>
-    a.name.localeCompare(b.name)
-  );
-
   const statusText = status ? (STATUS_TEXT[status] ?? `Error: ${status}`) : null;
   const isError = status != null && status !== "connected";
 
   return (
     <main>
       <header
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "baseline",
-        }}
+        style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}
       >
         <h1>Spajz</h1>
-        {logtoOn ? (
-          <span className="muted" style={{ fontSize: "0.85rem" }}>
-            {userName} · <a href="/sign-out">Sign out</a>
-          </span>
-        ) : (
-          <span className="muted" style={{ fontSize: "0.85rem" }}>
-            login disabled
-          </span>
-        )}
+        <span className="muted" style={{ fontSize: "0.85rem" }}>
+          <a href="/admin">Admin</a>
+          {" · "}
+          {logtoOn ? (
+            <>
+              {userName} · <a href="/sign-out">Sign out</a>
+            </>
+          ) : (
+            "login disabled"
+          )}
+        </span>
       </header>
-      <p className="muted">Import your last Rohlik order into the pantry.</p>
+      <p className="muted">Import your Rohlik orders into the pantry.</p>
 
       {statusText && (
         <div className={isError ? "error" : "notice"}>
           <p style={{ margin: 0 }}>{statusText}</p>
           {isError && statusDetail && (
-            <pre
-              style={{
-                margin: "0.5rem 0 0",
-                whiteSpace: "pre-wrap",
-                wordBreak: "break-word",
-                fontSize: "0.75rem",
-              }}
-            >
+            <pre style={{ margin: "0.5rem 0 0", whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: "0.75rem" }}>
               {statusDetail}
             </pre>
           )}
@@ -169,11 +127,7 @@ export default function DashboardClient({
         {connected ? (
           <div className="row" style={{ alignItems: "center" }}>
             <span>✅ Connected to Rohlik.</span>
-            <button
-              className="primary"
-              onClick={handleImport}
-              disabled={loading}
-            >
+            <button className="primary" onClick={handleImport} disabled={loading}>
               {loading ? "Importing…" : "Import last order"}
             </button>
             <a href="/api/rohlik/disconnect" className="muted">
@@ -193,27 +147,17 @@ export default function DashboardClient({
               </a>
             </p>
             <p className="muted" style={{ fontSize: "0.85rem" }}>
-              After you approve, your browser will try to open a{" "}
-              <code>localhost</code> page that won&apos;t load — that is expected.
-              Copy the <code>code</code> value from that page&apos;s address bar
-              (the part after <code>code=</code>), or paste the whole URL below.
+              After you approve, your browser will try to open a <code>localhost</code>{" "}
+              page that won&apos;t load — that is expected. Copy the <code>code</code>{" "}
+              value from that page&apos;s address bar (the part after <code>code=</code>),
+              or paste the whole URL below.
             </p>
-            <form
-              method="post"
-              action="/api/rohlik/oauth/finish"
-              className="row"
-            >
+            <form method="post" action="/api/rohlik/oauth/finish" className="row">
               <div style={{ flex: "1 1 320px" }}>
                 <label htmlFor="code">
                   <strong>Step 2.</strong> Paste the code (or the redirected URL)
                 </label>
-                <input
-                  id="code"
-                  name="code"
-                  type="text"
-                  autoComplete="off"
-                  required
-                />
+                <input id="code" name="code" type="text" autoComplete="off" required />
               </div>
               <button className="primary" type="submit">
                 Finish connecting
@@ -226,27 +170,21 @@ export default function DashboardClient({
         ) : (
           <div>
             <p className="muted" style={{ marginTop: 0, fontSize: "0.85rem" }}>
-              Sign in with your Rohlik account. You authorize on Rohlik&apos;s own
-              page — Spajz never sees your password.
+              Sign in with your Rohlik account. You authorize on Rohlik&apos;s own page —
+              Spajz never sees your password.
             </p>
             <a href="/api/rohlik/oauth/start">
               <button className="primary">Connect Rohlik</button>
             </a>
           </div>
         )}
-        {error && (
-          <p className="error" style={{ marginBottom: 0 }}>
-            {error}
-          </p>
-        )}
+        {note && <p className="notice" style={{ marginBottom: 0 }}>{note}</p>}
+        {error && <p className="error" style={{ marginBottom: 0 }}>{error}</p>}
       </div>
 
       {debug && (
         <details style={{ marginTop: "0.75rem" }}>
-          <summary
-            className="muted"
-            style={{ cursor: "pointer", fontSize: "0.85rem" }}
-          >
+          <summary className="muted" style={{ cursor: "pointer", fontSize: "0.85rem" }}>
             Diagnostics (what Rohlik returned) — copy this if import fails
           </summary>
           <div style={{ marginTop: "0.5rem" }}>
@@ -254,9 +192,7 @@ export default function DashboardClient({
               type="button"
               onClick={async () => {
                 try {
-                  await navigator.clipboard.writeText(
-                    JSON.stringify(debug, null, 2)
-                  );
+                  await navigator.clipboard.writeText(JSON.stringify(debug, null, 2));
                   setCopied(true);
                   setTimeout(() => setCopied(false), 1500);
                 } catch {
@@ -283,104 +219,41 @@ export default function DashboardClient({
         </details>
       )}
 
-      {order && (
-        <>
-          <h2>2 · Last order</h2>
-          {alreadyImported && (
-            <p className="notice">
-              This order ({order.orderId}) is already in your pantry. Importing
-              again is disabled.
-            </p>
-          )}
-          <div className="card">
-            <p className="muted" style={{ marginTop: 0, fontSize: "0.85rem" }}>
-              Order {order.orderId}
-              {order.orderedAt
-                ? ` · ${new Date(order.orderedAt).toLocaleDateString()}`
-                : ""}
-            </p>
-            <table>
-              <thead>
-                <tr>
-                  <th></th>
-                  <th>Item</th>
-                  <th className="num">Qty</th>
-                  <th>Unit</th>
-                  <th className="num">Price</th>
-                </tr>
-              </thead>
-              <tbody>
-                {order.items.map((it, i) => (
-                  <tr key={i}>
-                    <td>
-                      <input
-                        type="checkbox"
-                        checked={selection[i]?.checked ?? false}
-                        disabled={alreadyImported}
-                        onChange={(e) => toggle(i, e.target.checked)}
-                      />
-                    </td>
-                    <td>{it.name}</td>
-                    <td className="num">
-                      <input
-                        type="number"
-                        min={0}
-                        step="any"
-                        style={{ width: "5rem", textAlign: "right" }}
-                        value={selection[i]?.qty ?? it.quantity}
-                        disabled={alreadyImported}
-                        onChange={(e) => setQty(i, Number(e.target.value))}
-                      />
-                    </td>
-                    <td>{it.unit ?? ""}</td>
-                    <td className="num">
-                      {it.price != null ? `${it.price} Kč` : ""}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <div style={{ marginTop: "1rem" }}>
-              <button
-                className="primary"
-                onClick={handleAddToPantry}
-                disabled={alreadyImported}
-              >
-                Add selected to pantry
-              </button>
-            </div>
-          </div>
-        </>
-      )}
-
       <h2>Pantry</h2>
-      {pantryRows.length === 0 ? (
-        <p className="muted">Your pantry is empty.</p>
+      {!dbConfigured ? (
+        <p className="muted">
+          Database not configured (set <code>DATABASE_URL</code>). The pantry lives in Neon.
+        </p>
+      ) : !pantryReady ? (
+        <p className="muted">Loading…</p>
+      ) : pantry.length === 0 ? (
+        <p className="muted">
+          Your pantry is empty. Connect Rohlik and import an order (or use the{" "}
+          <a href="/admin">admin</a> to import 1–6 months). If you just deployed, apply
+          DB migrations in the admin first.
+        </p>
       ) : (
         <div className="card">
           <table>
             <thead>
               <tr>
-                <th>Item</th>
+                <th>Category</th>
                 <th className="num">Qty</th>
                 <th>Unit</th>
                 <th>Last bought</th>
               </tr>
             </thead>
             <tbody>
-              {pantryRows.map((p) => (
-                <tr key={p.key}>
-                  <td>{p.name}</td>
+              {pantry.map((p, i) => (
+                <tr key={i}>
+                  <td>{p.category ?? "Uncategorized"}</td>
                   <td className="num">{p.quantity}</td>
                   <td>{p.unit ?? ""}</td>
-                  <td>{new Date(p.lastBought).toLocaleDateString()}</td>
+                  <td>{p.lastBought ? new Date(p.lastBought).toLocaleDateString() : ""}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-          <div style={{ marginTop: "1rem" }}>
-            <button onClick={handleClear}>Clear pantry</button>
-          </div>
         </div>
       )}
     </main>

@@ -1,10 +1,13 @@
-// Neon + Drizzle connection. Scaffold only — the MVP never calls this.
-// Lazily constructed so importing the module never crashes when DATABASE_URL
-// is absent (e.g. local dev without a database).
+// Neon + Drizzle connection. Lazily constructed so importing the module never
+// crashes when DATABASE_URL is absent.
 
 import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
 import * as schema from "./schema";
+
+export function isDbConfigured(): boolean {
+  return Boolean(process.env.DATABASE_URL);
+}
 
 export function getDb() {
   const url = process.env.DATABASE_URL;

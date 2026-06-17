@@ -1,97 +1,102 @@
 # Spajz
 
 A home pantry tracker that talks to the [Rohlik](https://www.rohlik.cz) grocery
-store's MCP server. **This is the MVP:** import your *last* Rohlik order and push
-its items into a pantry stored in your browser.
+store's MCP server. Connect your Rohlik account, import your order history, and
+Spajz tracks what you have — aggregated by **category** (so "eggs" counts across
+brands) — in a Neon Postgres database.
 
-> Vision (later phases, not built yet): scan ~6 months of purchase history into a
-> database, auto-track what you buy, predict when each item runs out, prepare a
-> re-order via MCP, and ingest paper invoices from other shops via a multimodal
-> LLM.
+> Vision (Phase 3, documented not built): compute per-category consumption from
+> ~6 months of history, subtract it from the pantry on a schedule, and propose a
+> ready-to-place shopping cart via MCP. Plus: ingest paper invoices from other
+> shops via a multimodal LLM.
 
-## How it works (MVP)
+## How it works
 
-1. You click **Connect Rohlik** and sign in via **OAuth** on Rohlik's own page —
-   Spajz never sees your password. The access token is kept in an encrypted,
-   HTTP-only cookie.
-2. **Import last order** connects to `https://mcp.rohlik.cz/mcp` with that token,
-   calls `fetch_orders` (limit 1, delivered), and returns the most recent order.
-3. You pick which items (and quantities) to add. They go into a pantry kept in
-   `localStorage`.
-4. Re-importing the same order is blocked (imported order IDs are tracked in
-   `localStorage`).
-
-See [`docs/rohlik-mcp.md`](docs/rohlik-mcp.md) for confirmed details about the
-Rohlik MCP server: the OAuth setup, the `fetch_orders` response shape, and the
-full tool list.
+1. **Connect Rohlik** — sign in via **OAuth** on Rohlik's own page (Spajz never
+   sees your password). Because Rohlik's OAuth only allows loopback redirect
+   URIs, a hosted app uses a one-time copy-the-code step; the access token is
+   then kept in an encrypted, HTTP-only cookie. See
+   [`docs/rohlik-mcp.md`](docs/rohlik-mcp.md).
+2. **Import** — the dashboard imports your last order; the **admin** console
+   imports the last 1 or 6 months. Each calls `fetch_orders` and persists orders,
+   line items, products and **price history** to Neon (idempotent: re-imports are
+   deduped).
+3. **Pantry** — products roll up into categories; the pantry shows totals per
+   category. With AI enabled, new products are auto-categorized.
 
 ## Stack
 
-- **Next.js 15** (App Router, TypeScript), deployable on **Vercel**
-- **`@modelcontextprotocol/sdk`** — Rohlik MCP client (`StreamableHTTPClientTransport`)
-- **`@logto/next`** — authentication (optional, see below)
-- **Neon Postgres + Drizzle ORM** — scaffolded for Phase 2 (not used by the MVP)
+- **Next.js 15** (App Router, TypeScript) on **Vercel**
+- **`@modelcontextprotocol/sdk`** — Rohlik MCP client
+- **Neon Postgres + Drizzle ORM** — products, price history, orders, category pantry
+- **`@anthropic-ai/sdk`** — optional AI: product categorization + a parse-fallback
+- **`@logto/next`** — optional authentication
 
 ## Run locally
 
 ```bash
 npm install
-cp .env.example .env.local   # every var is optional for local dev
+cp .env.example .env.local   # fill in DATABASE_URL (+ optionally the others)
 npm run dev                  # http://localhost:3000
 ```
 
-With no env vars set, the app runs **without login** and the pantry works
-entirely in your browser. Live Rohlik import needs a real Rohlik account.
+## Configuration (`.env.example`)
 
-## Configuration
+- **`DATABASE_URL`** — Neon Postgres. **Required** for the pantry, imports and the
+  admin console. Apply the schema from **/admin → Apply migrations** (or
+  `npm run db:migrate`).
+- **`ANTHROPIC_API_KEY`** *(optional)* — enables AI product auto-categorization and
+  the parse-fallback. Both must also be toggled on in **/admin → AI**. Default
+  model `claude-opus-4-8` (switchable to `claude-sonnet-4-6` / `claude-haiku-4-5`).
+- **`ROHLIK_TOKEN_SECRET`** *(prod)* — encrypts the Rohlik token cookie.
+- **`ROHLIK_OAUTH_REDIRECT`** *(optional)* — loopback redirect URI (default
+  `http://localhost:8765/callback`).
+- **Logto** *(optional)* — set all five `LOGTO_*` vars to require sign-in on
+  `/dashboard`; leave blank to run without login. **`/admin` is intentionally
+  open** (demo).
 
-All env vars are optional. See `.env.example`.
+## Admin console (`/admin`, open)
 
-- **Rohlik:** nothing to configure — credentials are entered in the UI per run.
-- **Logto (optional):** set `LOGTO_ENDPOINT`, `LOGTO_APP_ID`, `LOGTO_APP_SECRET`,
-  `LOGTO_BASE_URL`, `LOGTO_COOKIE_SECRET`. When **all** are present, `/dashboard`
-  requires sign-in (callback route: `/callback`). Leave them blank to bypass
-  login. Create a free **Traditional Web** app at
-  [Logto Cloud](https://cloud.logto.io); set the redirect URI to
-  `<baseUrl>/callback` and the post-sign-out URI to `<baseUrl>`.
-- **Neon (optional, Phase 2):** set `DATABASE_URL`. The MVP pantry does not use
-  the database.
+- **Database** — see applied vs. defined migrations, **Apply migrations** button,
+  table row counts.
+- **AI** — toggles for categorization + parse-fallback, model dropdown.
+- **Imports** — Import last / 1 month / 6 months (needs a connected Rohlik
+  session), with an **import log** (counts + error messages).
+- **Danger zone** — delete orders, or everything.
 
-## Database scaffold (Phase 2)
+## Database
 
 ```bash
-npm run db:generate   # offline — emits drizzle/0000_init.sql from the schema
-npm run db:migrate    # needs a real DATABASE_URL
+npm run db:generate   # offline — regenerate migrations from src/lib/schema.ts
+npm run db:migrate    # apply via CLI (needs DATABASE_URL); /admin does the same at runtime
 ```
 
-Schema lives in `src/lib/schema.ts` (`users`, `purchases`, `pantry_items`).
+Schema (`src/lib/schema.ts`): `categories`, `products`, `price_history`, `orders`,
+`order_items`, `pantry_items`, `settings`, `import_logs`.
 
 ## Deploy to Vercel
 
-1. Import the repo in Vercel.
-2. Optionally set the `LOGTO_*` and `DATABASE_URL` env vars (skip for a
-   no-login demo). Set `LOGTO_BASE_URL` to your deployment URL.
-3. Deploy. The import route runs on the Node.js runtime with `maxDuration: 60`
-   (`vercel.json`) — well within limits for a single last-order read.
+1. Import the repo. Set `DATABASE_URL` (Neon), and optionally `ANTHROPIC_API_KEY`,
+   `ROHLIK_TOKEN_SECRET`, and the `LOGTO_*` vars. Set `LOGTO_BASE_URL` to the
+   deploy URL if using Logto.
+2. Deploy, then open **/admin → Apply migrations** once to create the tables.
+   (The migration SQL is bundled via `outputFileTracingIncludes` in
+   `next.config.ts`.)
+3. Connect Rohlik on the dashboard, then import.
 
 ## Verify
 
 ```bash
-npm run typecheck
-npm run lint
-npm run build
-npm run db:generate
+npm run typecheck && npm run lint && npm run build && npm run db:generate
 ```
 
-The live Rohlik import must be tested manually with real credentials (and
-outbound access to `mcp.rohlik.cz`).
+Live import (Rohlik), the database, and AI need real `DATABASE_URL` /
+`ANTHROPIC_API_KEY` / a connected Rohlik account, tested on the deploy.
 
-## Phase 2 — long-running 6-month scan
+## Long-running imports (Vercel)
 
-Reading ~6 months of history is many MCP calls and may exceed a single
-serverless invocation. Simplest-first:
-
-1. **Bump `maxDuration` + stream progress** (Pro: up to 800s). No new infra.
-2. **Client-driven chunking** *(recommended start)*: fetch the order list, then
-   issue one short request per order, persisting to Neon as you go.
-3. **Offload to a queue** (QStash / Inngest free tiers) only if 1–2 fall short.
+A 6-month import is a single `fetch_orders` call (items embedded) + DB writes +
+AI categorization of new products. The import route sets `maxDuration: 300`
+(Hobby caps at 60). AI categorization is batched and only runs for new products;
+imports are dedup-resumable, so re-running converges. If a single 6-month call
+still exceeds limits, import in monthly chunks.

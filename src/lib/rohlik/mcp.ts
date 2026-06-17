@@ -2,27 +2,59 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
 import { ROHLIK_MCP_URL } from "./oauth";
-import type {
-  LastOrderResponse,
-  OrderLineItem,
-  RohlikDebug,
-  ToolTrace,
-} from "./types";
+import type { RohlikDebug, ToolTrace } from "./types";
 
 interface ToolInfo {
   name: string;
   inputSchema?: { properties?: Record<string, unknown> };
 }
 
+export interface PersistItem {
+  rohlikProductId: string | null;
+  name: string;
+  quantity: number; // count bought (pieces when known, else 1)
+  unit: string | null; // raw unit: "l" | "piece" | "kg"
+  textualAmount: string | null; // "1 l", "6 ks", "250 g"
+  price: number | null; // line total price
+  currency: string | null;
+}
+
+export interface NormalizedOrder {
+  rohlikOrderId: string;
+  orderedAt: string | null;
+  state: string | null;
+  total: number | null;
+  currency: string | null;
+  itemsCount: number | null;
+  items: PersistItem[];
+  raw: Record<string, unknown>;
+}
+
+export type ImportOrdersResult =
+  | { ok: true; orders: NormalizedOrder[]; debug: RohlikDebug }
+  | { ok: false; error: string; debug: RohlikDebug };
+
+export interface FetchArgs {
+  dateFrom?: string; // YYYY-MM-DD
+  dateTo?: string; // YYYY-MM-DD
+  limit?: number; // 1-15
+  /**
+   * Optional AI parse-fallback: given the raw response text, returns an extracted
+   * JSON payload (e.g. `{ orders: [...] }`) or null. Used only when deterministic
+   * parsing yields no orders.
+   */
+  parseFallback?: (rawText: string) => Promise<unknown | null>;
+}
+
 /**
- * Connects to the Rohlik MCP server with an OAuth access token, reads the most
- * recent order and normalizes its line items. Returns a discriminated result
- * plus a diagnostics trace (so silent auth/format failures are visible instead
- * of collapsing into a misleading "no orders" message).
+ * Connects to the Rohlik MCP server with an OAuth token and reads orders via
+ * `fetch_orders` (date range or limit). Returns normalized, persist-ready orders
+ * plus a diagnostics trace.
  */
-export async function importLastOrder(
-  authProvider: OAuthClientProvider
-): Promise<LastOrderResponse> {
+export async function importOrders(
+  authProvider: OAuthClientProvider,
+  args: FetchArgs
+): Promise<ImportOrdersResult> {
   const debug: RohlikDebug = {
     connected: false,
     toolNames: [],
@@ -32,7 +64,6 @@ export async function importLastOrder(
   const transport = new StreamableHTTPClientTransport(new URL(ROHLIK_MCP_URL), {
     authProvider,
   });
-
   const client = new Client(
     { name: "spajz", version: "0.1.0" },
     { capabilities: {} }
@@ -69,35 +100,53 @@ export async function importLastOrder(
     debug.historyToolSchema =
       tools.find((t) => t.name === historyTool)?.inputSchema ?? null;
 
-    // fetch_orders requires at least one search parameter; fetch a few recent
-    // delivered orders and pick the newest by date (robust to API sort order).
-    const historyArgs: Record<string, unknown> = { limit: 5 };
-    const historyRaw = await callTool(client, historyTool, historyArgs);
-    debug.history = trace(historyTool, historyArgs, historyRaw);
-    if (isToolError(historyRaw)) {
-      const raw = textOf(historyRaw) ?? "(no message)";
-      const error = looksLikeAuthFailure(raw)
-        ? "Rohlik rejected the login. Double-check your Rohlik email and password. If they're correct, Rohlik may have emailed you to confirm a new login — approve it and try again. Accounts with 2-step verification can't be used this way."
-        : `Rohlik returned an error from "${historyTool}": ${raw}`;
+    // fetch_orders requires at least one search parameter.
+    const toolArgs: Record<string, unknown> = { order_type: "delivered" };
+    if (args.dateFrom) toolArgs.date_from = args.dateFrom;
+    if (args.dateTo) toolArgs.date_to = args.dateTo;
+    if (args.limit) toolArgs.limit = args.limit;
+    if (!args.dateFrom && !args.dateTo && !args.limit) toolArgs.limit = 5;
+
+    const raw = await callTool(client, historyTool, toolArgs);
+    debug.history = trace(historyTool, toolArgs, raw);
+    if (isToolError(raw)) {
+      const text = textOf(raw) ?? "(no message)";
+      const error = looksLikeAuthFailure(text)
+        ? "Rohlik rejected the login. Reconnect Rohlik and approve any new-login email; accounts with 2-step verification can't be used this way."
+        : `Rohlik returned an error from "${historyTool}": ${text}`;
       return { ok: false, error, debug };
     }
 
-    // Try both structuredContent and the JSON text; use whichever yields orders.
-    let orders: RawOrder[] = [];
+    let rawOrders: Record<string, unknown>[] = [];
     let apiErr: string | null = null;
-    for (const candidate of candidates(historyRaw)) {
+    for (const candidate of candidates(raw)) {
       const e = apiErrorMessage(candidate);
       if (e) {
         apiErr = e;
         continue;
       }
-      const parsed = normalizeOrderList(candidate);
-      if (parsed.length > 0) {
-        orders = parsed;
+      const arr = firstArray(candidate, ["orders", "items", "data", "history"]);
+      if (arr.length > 0) {
+        rawOrders = arr;
         break;
       }
     }
-    if (orders.length === 0) {
+
+    // AI parse-fallback for unexpected response shapes.
+    if (rawOrders.length === 0 && args.parseFallback) {
+      const text = textOf(raw);
+      if (text) {
+        try {
+          const extracted = await args.parseFallback(text);
+          const arr = firstArray(extracted, ["orders", "items", "data", "history"]);
+          if (arr.length > 0) rawOrders = arr;
+        } catch {
+          // fall through to the not-parsed error below
+        }
+      }
+    }
+
+    if (rawOrders.length === 0) {
       return {
         ok: false,
         error: apiErr
@@ -107,40 +156,91 @@ export async function importLastOrder(
       };
     }
 
-    const latest = pickLatest(orders);
-
-    // Use line items embedded in the summary; otherwise fetch the full order by
-    // id (fetch_orders with order_id returns the detailed order).
-    let items = normalizeLineItems(latest.raw);
-    if (items.length === 0) {
-      const detailArgs: Record<string, unknown> = {
-        order_id: asIntOrString(latest.orderId),
-      };
-      const detailRaw = await callTool(client, historyTool, detailArgs);
-      debug.detail = trace(historyTool, detailArgs, detailRaw);
-      if (!isToolError(detailRaw)) {
-        for (const candidate of candidates(detailRaw)) {
-          if (apiErrorMessage(candidate)) continue;
-          const detailOrder = normalizeOrderList(candidate)[0];
-          const its = detailOrder
-            ? normalizeLineItems(detailOrder.raw)
-            : normalizeLineItems(candidate);
-          if (its.length > 0) {
-            items = its;
-            break;
-          }
-        }
-      }
-    }
-
-    return {
-      ok: true,
-      order: { orderId: latest.orderId, orderedAt: latest.orderedAt, items },
-      debug,
-    };
+    const orders = rawOrders
+      .map(toNormalizedOrder)
+      .filter((o) => o.rohlikOrderId.length > 0);
+    return { ok: true, orders, debug };
   } finally {
     await client.close().catch(() => {});
   }
+}
+
+/** Picks the newest order by date (for "import last order"). */
+export function newestOrder(orders: NormalizedOrder[]): NormalizedOrder | null {
+  if (orders.length === 0) return null;
+  const dated = orders.filter((o) => o.orderedAt);
+  if (dated.length > 0) {
+    return dated.reduce((a, b) => (a.orderedAt! >= b.orderedAt! ? a : b));
+  }
+  return orders[0];
+}
+
+// --- Normalization (Rohlik fetch_orders shape; see docs/rohlik-mcp.md) ---
+
+function toNormalizedOrder(raw: Record<string, unknown>): NormalizedOrder {
+  const total = priceTotal(raw);
+  return {
+    rohlikOrderId: String(pick(raw, ["id", "orderId", "order_id", "number"]) ?? ""),
+    orderedAt: asIso(
+      pick(raw, ["orderTime", "orderedAt", "createdAt", "date", "created_at"])
+    ),
+    state: optStr(pick(raw, ["state", "status"])),
+    total: total.amount,
+    currency: total.currency,
+    itemsCount: asIntOrNull(pick(raw, ["itemsCount", "items_count"])),
+    items: normalizePersistItems(raw),
+    raw,
+  };
+}
+
+function priceTotal(raw: Record<string, unknown>): {
+  amount: number | null;
+  currency: string | null;
+} {
+  const pc = raw["priceComposition"];
+  if (isRecord(pc) && isRecord(pc["total"])) {
+    return {
+      amount: asNumberOrNull(pc["total"]["amount"]),
+      currency: optStr(pc["total"]["currency"]),
+    };
+  }
+  return {
+    amount: asNumberOrNull(pick(raw, ["totalPrice", "total"])),
+    currency: optStr(pick(raw, ["currency"])),
+  };
+}
+
+function normalizePersistItems(raw: Record<string, unknown>): PersistItem[] {
+  const pieces = piecesByProduct(raw);
+  return firstArray(raw, ["items", "lineItems", "products"]).map((it) => {
+    const pid = optStr(pick(it, ["productId", "product_id", "id"]));
+    const counted = pid ? pieces[pid] : undefined;
+    return {
+      rohlikProductId: pid,
+      name: String(pick(it, ["name", "productName", "title"]) ?? "Unknown item"),
+      quantity: counted ?? asNumber(pick(it, ["quantity", "amount", "count"]), 1),
+      unit: optStr(pick(it, ["unit", "unitName", "measure"])),
+      textualAmount: optStr(pick(it, ["textualAmount", "textual_amount"])),
+      price: asNumberOrNull(pick(it, ["totalPrice", "price", "unitPrice"])),
+      currency: optStr(pick(it, ["currency"])),
+    };
+  });
+}
+
+// Multi-pack counts live in warrantyInfo.enabledData[].pieces (a subset of items).
+function piecesByProduct(raw: Record<string, unknown>): Record<string, number> {
+  const out: Record<string, number> = {};
+  const wi = raw["warrantyInfo"];
+  if (isRecord(wi) && Array.isArray(wi["enabledData"])) {
+    for (const e of wi["enabledData"]) {
+      if (isRecord(e)) {
+        const pid = optStr(pick(e, ["productId", "product_id", "id"]));
+        const pc = asNumberOrNull(pick(e, ["pieces"]));
+        if (pid && pc && pc > 0) out[pid] = pc;
+      }
+    }
+  }
+  return out;
 }
 
 // --- MCP result helpers ---
@@ -177,9 +277,7 @@ function textOf(result: ToolResult): string | null {
   return null;
 }
 
-// Candidate parsed payloads. We try each because some tools put orders in
-// structuredContent under a wrapper key while the text body has the plain
-// {success, orders} shape (or vice versa).
+// Try structuredContent first, then the JSON text body.
 function candidates(result: ToolResult): unknown[] {
   const out: unknown[] = [];
   if (
@@ -255,51 +353,8 @@ function apiErrorMessage(data: unknown): string | null {
   return null;
 }
 
-function asIntOrString(s: string): number | string {
-  const n = Number(s);
-  return Number.isInteger(n) && s.trim() !== "" ? n : s;
-}
-
 function msg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
-}
-
-// --- Defensive normalization (exact Rohlik shape still unconfirmed) ---
-
-interface RawOrder {
-  orderId: string;
-  orderedAt: string | null;
-  raw: Record<string, unknown>;
-}
-
-function normalizeOrderList(data: unknown): RawOrder[] {
-  return firstArray(data, ["orders", "items", "data", "history"])
-    .map((o) => ({
-      orderId: String(pick(o, ["id", "orderId", "order_id", "number"]) ?? ""),
-      orderedAt: asIso(
-        pick(o, ["orderTime", "orderedAt", "createdAt", "date", "created_at"])
-      ),
-      raw: o,
-    }))
-    .filter((o) => o.orderId.length > 0);
-}
-
-function normalizeLineItems(data: unknown): OrderLineItem[] {
-  return firstArray(data, ["items", "lineItems", "products", "data"]).map((it) => ({
-    productId: optStr(pick(it, ["productId", "product_id", "id"])),
-    name: String(pick(it, ["name", "productName", "title"]) ?? "Unknown item"),
-    quantity: asNumber(pick(it, ["quantity", "amount", "count"]), 1),
-    unit: optStr(pick(it, ["textualAmount", "unit", "unitName", "measure"])),
-    price: asNumberOrNull(pick(it, ["totalPrice", "price", "unitPrice"])),
-  }));
-}
-
-function pickLatest(orders: RawOrder[]): RawOrder {
-  const dated = orders.filter((o) => o.orderedAt);
-  if (dated.length > 0) {
-    return dated.reduce((a, b) => (a.orderedAt! >= b.orderedAt! ? a : b));
-  }
-  return orders[0];
 }
 
 // --- tiny primitives ---
@@ -335,6 +390,11 @@ function asNumberOrNull(v: unknown): number | null {
   if (v === undefined || v === null || v === "") return null;
   const n = typeof v === "string" ? Number(v.replace(",", ".")) : Number(v);
   return Number.isFinite(n) ? n : null;
+}
+
+function asIntOrNull(v: unknown): number | null {
+  const n = asNumberOrNull(v);
+  return n === null ? null : Math.trunc(n);
 }
 
 function optStr(v: unknown): string | null {

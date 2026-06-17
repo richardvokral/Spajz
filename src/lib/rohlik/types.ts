@@ -1,21 +1,5 @@
-// Shared types for Rohlik order data flowing from the MCP server to the UI.
-
-export interface OrderLineItem {
-  productId: string | null;
-  name: string;
-  quantity: number;
-  unit: string | null;
-  price: number | null; // CZK, unit or line price as reported by Rohlik
-}
-
-export interface LastOrder {
-  orderId: string;
-  orderedAt: string | null; // ISO date if Rohlik provides one
-  items: OrderLineItem[];
-}
-
-// Diagnostic trace returned alongside the result so we can see exactly what the
-// Rohlik MCP server replied (temporary aid while the real shapes are unknown).
+// Diagnostics trace returned alongside import results so we can see exactly what
+// the Rohlik MCP server replied (temporary aid while shapes are confirmed).
 export interface ToolTrace {
   tool: string;
   args: Record<string, unknown>;
@@ -29,12 +13,7 @@ export interface RohlikDebug {
   connected: boolean;
   toolNames: string[];
   historyTool: string | null;
-  historyToolSchema?: unknown; // inputSchema of the chosen orders tool
+  historyToolSchema?: unknown;
   history?: ToolTrace;
   detail?: ToolTrace;
 }
-
-// Discriminated response returned by the /api/rohlik/last-order route.
-export type LastOrderResponse =
-  | { ok: true; order: LastOrder; debug: RohlikDebug }
-  | { ok: false; error: string; debug: RohlikDebug };
