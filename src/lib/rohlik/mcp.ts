@@ -71,14 +71,18 @@ export async function importLastOrder(
     }
 
     const historyTool =
-      pickTool(tools, ["get_order_history", "order_history", "get_orders"], [
-        "history",
-        "order",
-      ]) ?? "get_order_history";
+      pickTool(
+        tools,
+        ["fetch_orders", "get_order_history", "get_orders", "list_orders"],
+        ["fetch", "order"]
+      ) ?? "fetch_orders";
     debug.historyTool = historyTool;
+    debug.historyToolSchema =
+      tools.find((t) => t.name === historyTool)?.inputSchema ?? null;
 
-    const historyRaw = await callTool(client, historyTool, {});
-    debug.history = trace(historyTool, historyRaw);
+    const historyArgs: Record<string, unknown> = {};
+    const historyRaw = await callTool(client, historyTool, historyArgs);
+    debug.history = trace(historyTool, historyArgs, historyRaw);
     if (isToolError(historyRaw)) {
       return {
         ok: false,
@@ -105,15 +109,14 @@ export async function importLastOrder(
     if (items.length === 0) {
       const detailTool = pickTool(
         tools,
-        ["get_order_detail", "order_detail"],
-        ["detail"]
+        ["get_order_detail", "order_detail", "get_order"],
+        ["order", "detail"]
       );
       if (detailTool) {
         const tool = tools.find((t) => t.name === detailTool);
-        const detailRaw = await callTool(client, detailTool, {
-          [idArgName(tool)]: latest.orderId,
-        });
-        debug.detail = trace(detailTool, detailRaw);
+        const detailArgs = { [idArgName(tool)]: latest.orderId };
+        const detailRaw = await callTool(client, detailTool, detailArgs);
+        debug.detail = trace(detailTool, detailArgs, detailRaw);
         if (!isToolError(detailRaw)) {
           items = normalizeLineItems(extractData(detailRaw));
         }
@@ -179,12 +182,17 @@ function extractData(result: ToolResult): unknown {
   return result;
 }
 
-function trace(tool: string, result: ToolResult): ToolTrace {
+function trace(
+  tool: string,
+  args: Record<string, unknown>,
+  result: ToolResult
+): ToolTrace {
   const text = textOf(result);
   return {
     tool,
+    args,
     isError: result.isError === true,
-    text: text ? text.slice(0, 2000) : null,
+    text: text ? text.slice(0, 4000) : null,
     hasStructured:
       result.structuredContent !== undefined && result.structuredContent !== null,
   };

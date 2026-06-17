@@ -18,6 +18,7 @@ export interface LastOrder {
 // Rohlik MCP server replied (temporary aid while the real shapes are unknown).
 export interface ToolTrace {
   tool: string;
+  args: Record<string, unknown>;
   isError: boolean;
   text: string | null; // raw content text (truncated)
   hasStructured: boolean;
@@ -27,6 +28,7 @@ export interface RohlikDebug {
   connected: boolean;
   toolNames: string[];
   historyTool: string | null;
+  historyToolSchema?: unknown; // inputSchema of the chosen orders tool
   history?: ToolTrace;
   detail?: ToolTrace;
 }
