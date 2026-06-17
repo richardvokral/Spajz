@@ -21,6 +21,10 @@ its items into a pantry stored in your browser.
 4. Re-importing the same order is blocked (imported order IDs are tracked in
    `localStorage`).
 
+See [`docs/rohlik-mcp.md`](docs/rohlik-mcp.md) for confirmed details about the
+Rohlik MCP server: the OAuth setup, the `fetch_orders` response shape, and the
+full tool list.
+
 ## Stack
 
 - **Next.js 15** (App Router, TypeScript), deployable on **Vercel**
