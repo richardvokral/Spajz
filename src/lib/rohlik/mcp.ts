@@ -82,22 +82,27 @@ export async function importLastOrder(
       return { ok: false, error, debug };
     }
 
-    const historyData = extractData(historyRaw);
-    const apiErr = apiErrorMessage(historyData);
-    if (apiErr) {
-      return {
-        ok: false,
-        error: `Rohlik could not return your orders: ${apiErr}`,
-        debug,
-      };
+    // Try both structuredContent and the JSON text; use whichever yields orders.
+    let orders: RawOrder[] = [];
+    let apiErr: string | null = null;
+    for (const candidate of candidates(historyRaw)) {
+      const e = apiErrorMessage(candidate);
+      if (e) {
+        apiErr = e;
+        continue;
+      }
+      const parsed = normalizeOrderList(candidate);
+      if (parsed.length > 0) {
+        orders = parsed;
+        break;
+      }
     }
-
-    const orders = normalizeOrderList(historyData);
     if (orders.length === 0) {
       return {
         ok: false,
-        error:
-          "Connected, but no orders could be parsed from the response. Expand Diagnostics to see what Rohlik returned.",
+        error: apiErr
+          ? `Rohlik could not return your orders: ${apiErr}`
+          : "Connected, but no orders could be parsed from the response. Expand Diagnostics to see what Rohlik returned.",
         debug,
       };
     }
@@ -114,12 +119,16 @@ export async function importLastOrder(
       const detailRaw = await callTool(client, historyTool, detailArgs);
       debug.detail = trace(historyTool, detailArgs, detailRaw);
       if (!isToolError(detailRaw)) {
-        const detailData = extractData(detailRaw);
-        if (!apiErrorMessage(detailData)) {
-          const detailOrder = normalizeOrderList(detailData)[0];
-          items = detailOrder
+        for (const candidate of candidates(detailRaw)) {
+          if (apiErrorMessage(candidate)) continue;
+          const detailOrder = normalizeOrderList(candidate)[0];
+          const its = detailOrder
             ? normalizeLineItems(detailOrder.raw)
-            : normalizeLineItems(detailData);
+            : normalizeLineItems(candidate);
+          if (its.length > 0) {
+            items = its;
+            break;
+          }
         }
       }
     }
@@ -168,19 +177,26 @@ function textOf(result: ToolResult): string | null {
   return null;
 }
 
-function extractData(result: ToolResult): unknown {
-  if (result.structuredContent !== undefined && result.structuredContent !== null) {
-    return result.structuredContent;
+// Candidate parsed payloads. We try each because some tools put orders in
+// structuredContent under a wrapper key while the text body has the plain
+// {success, orders} shape (or vice versa).
+function candidates(result: ToolResult): unknown[] {
+  const out: unknown[] = [];
+  if (
+    result.structuredContent !== undefined &&
+    result.structuredContent !== null
+  ) {
+    out.push(result.structuredContent);
   }
   const text = textOf(result);
   if (typeof text === "string") {
     try {
-      return JSON.parse(text);
+      out.push(JSON.parse(text));
     } catch {
-      return { _text: text };
+      // not JSON; ignore
     }
   }
-  return result;
+  return out;
 }
 
 function trace(
@@ -189,13 +205,23 @@ function trace(
   result: ToolResult
 ): ToolTrace {
   const text = textOf(result);
+  const hasStructured =
+    result.structuredContent !== undefined && result.structuredContent !== null;
+  let structured: string | null = null;
+  if (hasStructured) {
+    try {
+      structured = JSON.stringify(result.structuredContent).slice(0, 4000);
+    } catch {
+      structured = "[unserializable]";
+    }
+  }
   return {
     tool,
     args,
     isError: result.isError === true,
     text: text ? text.slice(0, 4000) : null,
-    hasStructured:
-      result.structuredContent !== undefined && result.structuredContent !== null,
+    hasStructured,
+    structured,
   };
 }
 

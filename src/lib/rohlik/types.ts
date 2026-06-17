@@ -22,6 +22,7 @@ export interface ToolTrace {
   isError: boolean;
   text: string | null; // raw content text (truncated)
   hasStructured: boolean;
+  structured: string | null; // structuredContent, JSON-stringified (truncated)
 }
 
 export interface RohlikDebug {

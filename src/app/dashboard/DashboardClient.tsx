@@ -51,6 +51,7 @@ export default function DashboardClient({
   const [alreadyImported, setAlreadyImported] = useState(false);
   const [selection, setSelection] = useState<Selection[]>([]);
   const [debug, setDebug] = useState<RohlikDebug | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const [pantry, setPantry] = useState<Pantry>({});
 
@@ -248,6 +249,24 @@ export default function DashboardClient({
           >
             Diagnostics (what Rohlik returned) — copy this if import fails
           </summary>
+          <div style={{ marginTop: "0.5rem" }}>
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(
+                    JSON.stringify(debug, null, 2)
+                  );
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 1500);
+                } catch {
+                  setCopied(false);
+                }
+              }}
+            >
+              {copied ? "Copied ✓" : "Copy diagnostics"}
+            </button>
+          </div>
           <pre
             style={{
               overflow: "auto",
@@ -256,6 +275,7 @@ export default function DashboardClient({
               border: "1px solid var(--border)",
               borderRadius: "6px",
               padding: "0.75rem",
+              marginTop: "0.5rem",
             }}
           >
             {JSON.stringify(debug, null, 2)}
