@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "src/app/api/rohlik/last-order/route.ts": {
+      "maxDuration": 60
+    }
+  }
+}
