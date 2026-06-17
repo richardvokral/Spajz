@@ -14,7 +14,24 @@ export interface LastOrder {
   items: OrderLineItem[];
 }
 
+// Diagnostic trace returned alongside the result so we can see exactly what the
+// Rohlik MCP server replied (temporary aid while the real shapes are unknown).
+export interface ToolTrace {
+  tool: string;
+  isError: boolean;
+  text: string | null; // raw content text (truncated)
+  hasStructured: boolean;
+}
+
+export interface RohlikDebug {
+  connected: boolean;
+  toolNames: string[];
+  historyTool: string | null;
+  history?: ToolTrace;
+  detail?: ToolTrace;
+}
+
 // Discriminated response returned by the /api/rohlik/last-order route.
 export type LastOrderResponse =
-  | { ok: true; order: LastOrder }
-  | { ok: false; error: string };
+  | { ok: true; order: LastOrder; debug: RohlikDebug }
+  | { ok: false; error: string; debug: RohlikDebug };

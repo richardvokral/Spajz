@@ -1,7 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { LastOrder, LastOrderResponse, OrderLineItem } from "@/lib/rohlik/types";
+import type {
+  LastOrder,
+  LastOrderResponse,
+  OrderLineItem,
+  RohlikDebug,
+} from "@/lib/rohlik/types";
 import {
   addItemsToPantry,
   clearPantry,
@@ -31,6 +36,7 @@ export default function DashboardClient({
   const [order, setOrder] = useState<LastOrder | null>(null);
   const [alreadyImported, setAlreadyImported] = useState(false);
   const [selection, setSelection] = useState<Selection[]>([]);
+  const [debug, setDebug] = useState<RohlikDebug | null>(null);
 
   const [pantry, setPantry] = useState<Pantry>({});
 
@@ -43,6 +49,7 @@ export default function DashboardClient({
     setLoading(true);
     setError(null);
     setOrder(null);
+    setDebug(null);
 
     try {
       const res = await fetch("/api/rohlik/last-order", {
@@ -51,6 +58,7 @@ export default function DashboardClient({
         body: JSON.stringify({ email, password }),
       });
       const data = (await res.json()) as LastOrderResponse;
+      setDebug(data.debug ?? null);
 
       if (!data.ok) {
         setError(data.error);
@@ -166,6 +174,26 @@ export default function DashboardClient({
           </p>
         )}
       </form>
+
+      {debug && (
+        <details style={{ marginTop: "0.75rem" }}>
+          <summary className="muted" style={{ cursor: "pointer", fontSize: "0.85rem" }}>
+            Diagnostics (what Rohlik returned) — copy this if import fails
+          </summary>
+          <pre
+            style={{
+              overflow: "auto",
+              fontSize: "0.75rem",
+              background: "#fff",
+              border: "1px solid var(--border)",
+              borderRadius: "6px",
+              padding: "0.75rem",
+            }}
+          >
+            {JSON.stringify(debug, null, 2)}
+          </pre>
+        </details>
+      )}
 
       {order && (
         <>

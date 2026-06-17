@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getLastOrder } from "@/lib/rohlik/mcp";
+import { importLastOrder } from "@/lib/rohlik/mcp";
 import type { LastOrderResponse } from "@/lib/rohlik/types";
 
 // The MCP SDK needs the Node.js runtime (not Edge).
@@ -18,18 +18,16 @@ export async function POST(req: Request): Promise<NextResponse<LastOrderResponse
     creds = Body.parse(await req.json());
   } catch {
     return NextResponse.json(
-      { ok: false, error: "Enter a valid Rohlik email and password." },
+      {
+        ok: false,
+        error: "Enter a valid Rohlik email and password.",
+        debug: { connected: false, toolNames: [], historyTool: null },
+      },
       { status: 400 }
     );
   }
 
-  try {
-    // Credentials are used only here and are never stored or logged.
-    const order = await getLastOrder(creds);
-    return NextResponse.json({ ok: true, order });
-  } catch (err) {
-    const error =
-      err instanceof Error ? err.message : "Could not reach the Rohlik MCP server.";
-    return NextResponse.json({ ok: false, error }, { status: 502 });
-  }
+  // Credentials are used only here and are never stored or logged.
+  const result = await importLastOrder(creds);
+  return NextResponse.json(result, { status: result.ok ? 200 : 502 });
 }

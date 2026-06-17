@@ -1,6 +1,11 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import type { LastOrder, OrderLineItem } from "./types";
+import type {
+  LastOrderResponse,
+  OrderLineItem,
+  RohlikDebug,
+  ToolTrace,
+} from "./types";
 
 const ROHLIK_MCP_URL = "https://mcp.rohlik.cz/mcp";
 
@@ -9,12 +14,27 @@ export interface RohlikCredentials {
   password: string;
 }
 
+interface ToolInfo {
+  name: string;
+  inputSchema?: { properties?: Record<string, unknown> };
+}
+
 /**
- * Connects to the Rohlik MCP server using the legacy header auth, fetches the
- * most recent order and returns its normalized line items. The credentials are
- * used only for this call and are never persisted anywhere.
+ * Connects to the Rohlik MCP server with the legacy header auth, reads the most
+ * recent order and normalizes its line items. Returns a discriminated result
+ * plus a diagnostics trace (so silent auth/format failures are visible instead
+ * of collapsing into a misleading "no orders" message). Credentials are used
+ * only for this call and are never persisted.
  */
-export async function getLastOrder(creds: RohlikCredentials): Promise<LastOrder> {
+export async function importLastOrder(
+  creds: RohlikCredentials
+): Promise<LastOrderResponse> {
+  const debug: RohlikDebug = {
+    connected: false,
+    toolNames: [],
+    historyTool: null,
+  };
+
   const transport = new StreamableHTTPClientTransport(new URL(ROHLIK_MCP_URL), {
     requestInit: {
       headers: {
@@ -30,59 +50,191 @@ export async function getLastOrder(creds: RohlikCredentials): Promise<LastOrder>
   );
 
   try {
-    await client.connect(transport);
+    try {
+      await client.connect(transport);
+    } catch (err) {
+      return {
+        ok: false,
+        error: `Could not connect to Rohlik (this usually means wrong credentials or an OAuth-only endpoint): ${msg(err)}`,
+        debug,
+      };
+    }
+    debug.connected = true;
 
-    const historyRaw = await client.callTool({
-      name: "get_order_history",
-      arguments: {},
-    });
-    const orders = normalizeOrderList(extractJson(historyRaw));
+    let tools: ToolInfo[] = [];
+    try {
+      const listed = await client.listTools();
+      tools = (listed.tools ?? []) as ToolInfo[];
+      debug.toolNames = tools.map((t) => t.name);
+    } catch {
+      // Listing failed but we can still try the conventional tool name.
+    }
+
+    const historyTool =
+      pickTool(tools, ["get_order_history", "order_history", "get_orders"], [
+        "history",
+        "order",
+      ]) ?? "get_order_history";
+    debug.historyTool = historyTool;
+
+    const historyRaw = await callTool(client, historyTool, {});
+    debug.history = trace(historyTool, historyRaw);
+    if (isToolError(historyRaw)) {
+      return {
+        ok: false,
+        error: `Rohlik returned an error from "${historyTool}": ${textOf(historyRaw) ?? "(no message)"}`,
+        debug,
+      };
+    }
+
+    const orders = normalizeOrderList(extractData(historyRaw));
     if (orders.length === 0) {
-      throw new Error("No past Rohlik orders were found on this account.");
+      return {
+        ok: false,
+        error:
+          "Connected, but no orders could be read from the history response. This is most often an authentication problem (wrong Rohlik password, or a pending new-login confirmation email), or an unexpected response format. Expand Diagnostics to see what Rohlik actually returned.",
+        debug,
+      };
     }
 
     const latest = pickLatest(orders);
 
-    const detailRaw = await client.callTool({
-      name: "get_order_detail",
-      arguments: { orderId: latest.orderId },
-    });
-    const items = normalizeLineItems(extractJson(detailRaw));
+    // Some history endpoints already embed line items; use them if present.
+    let items = normalizeLineItems(latest.raw);
 
-    return { orderId: latest.orderId, orderedAt: latest.orderedAt, items };
+    if (items.length === 0) {
+      const detailTool = pickTool(
+        tools,
+        ["get_order_detail", "order_detail"],
+        ["detail"]
+      );
+      if (detailTool) {
+        const tool = tools.find((t) => t.name === detailTool);
+        const detailRaw = await callTool(client, detailTool, {
+          [idArgName(tool)]: latest.orderId,
+        });
+        debug.detail = trace(detailTool, detailRaw);
+        if (!isToolError(detailRaw)) {
+          items = normalizeLineItems(extractData(detailRaw));
+        }
+      }
+    }
+
+    return {
+      ok: true,
+      order: { orderId: latest.orderId, orderedAt: latest.orderedAt, items },
+      debug,
+    };
   } finally {
     await client.close().catch(() => {});
   }
 }
 
-// --- Defensive parsing/normalization (exact Rohlik JSON shape is unknown) ---
+// --- MCP result helpers ---
 
-function extractJson(result: unknown): unknown {
-  const content = (result as { content?: unknown }).content;
-  if (Array.isArray(content)) {
-    const text = content.find(
-      (c): c is { type: string; text: string } =>
-        typeof c?.type === "string" && c.type === "text" && typeof c?.text === "string"
-    )?.text;
-    if (typeof text === "string") {
-      try {
-        return JSON.parse(text);
-      } catch {
-        return { _raw: text };
-      }
-    }
-  }
-  // Some servers return structured content directly.
-  return (result as { structuredContent?: unknown }).structuredContent ?? result;
+type ToolResult = {
+  isError?: boolean;
+  content?: unknown;
+  structuredContent?: unknown;
+};
+
+async function callTool(
+  client: Client,
+  name: string,
+  args: Record<string, unknown>
+): Promise<ToolResult> {
+  return (await client.callTool({ name, arguments: args })) as ToolResult;
 }
 
-function normalizeOrderList(
-  data: unknown
-): { orderId: string; orderedAt: string | null }[] {
+function isToolError(result: ToolResult): boolean {
+  return result.isError === true;
+}
+
+function textOf(result: ToolResult): string | null {
+  const content = result.content;
+  if (Array.isArray(content)) {
+    const parts = content
+      .filter(
+        (c): c is { type: string; text: string } =>
+          c?.type === "text" && typeof c?.text === "string"
+      )
+      .map((c) => c.text);
+    if (parts.length > 0) return parts.join("\n");
+  }
+  return null;
+}
+
+function extractData(result: ToolResult): unknown {
+  if (result.structuredContent !== undefined && result.structuredContent !== null) {
+    return result.structuredContent;
+  }
+  const text = textOf(result);
+  if (typeof text === "string") {
+    try {
+      return JSON.parse(text);
+    } catch {
+      return { _text: text };
+    }
+  }
+  return result;
+}
+
+function trace(tool: string, result: ToolResult): ToolTrace {
+  const text = textOf(result);
+  return {
+    tool,
+    isError: result.isError === true,
+    text: text ? text.slice(0, 2000) : null,
+    hasStructured:
+      result.structuredContent !== undefined && result.structuredContent !== null,
+  };
+}
+
+function pickTool(
+  tools: ToolInfo[],
+  exact: string[],
+  contains: string[]
+): string | null {
+  if (tools.length === 0) return null;
+  const names = tools.map((t) => t.name);
+  for (const e of exact) if (names.includes(e)) return e;
+  const lowered = contains.map((c) => c.toLowerCase());
+  const match = names.find((n) =>
+    lowered.every((c) => n.toLowerCase().includes(c))
+  );
+  return match ?? null;
+}
+
+function idArgName(tool: ToolInfo | undefined): string {
+  const props = tool?.inputSchema?.properties;
+  if (props) {
+    for (const k of ["orderId", "order_id", "id", "orderNumber", "number"]) {
+      if (k in props) return k;
+    }
+    const first = Object.keys(props)[0];
+    if (first) return first;
+  }
+  return "orderId";
+}
+
+function msg(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+// --- Defensive normalization (exact Rohlik shape still unconfirmed) ---
+
+interface RawOrder {
+  orderId: string;
+  orderedAt: string | null;
+  raw: Record<string, unknown>;
+}
+
+function normalizeOrderList(data: unknown): RawOrder[] {
   return firstArray(data, ["orders", "items", "data", "history"])
     .map((o) => ({
       orderId: String(pick(o, ["id", "orderId", "order_id", "number"]) ?? ""),
       orderedAt: asIso(pick(o, ["orderedAt", "createdAt", "date", "created_at"])),
+      raw: o,
     }))
     .filter((o) => o.orderId.length > 0);
 }
@@ -97,9 +249,7 @@ function normalizeLineItems(data: unknown): OrderLineItem[] {
   }));
 }
 
-function pickLatest(
-  orders: { orderId: string; orderedAt: string | null }[]
-): { orderId: string; orderedAt: string | null } {
+function pickLatest(orders: RawOrder[]): RawOrder {
   const dated = orders.filter((o) => o.orderedAt);
   if (dated.length > 0) {
     return dated.reduce((a, b) => (a.orderedAt! >= b.orderedAt! ? a : b));
