@@ -86,11 +86,11 @@ export async function importLastOrder(
     const historyRaw = await callTool(client, historyTool, historyArgs);
     debug.history = trace(historyTool, historyArgs, historyRaw);
     if (isToolError(historyRaw)) {
-      return {
-        ok: false,
-        error: `Rohlik returned an error from "${historyTool}": ${textOf(historyRaw) ?? "(no message)"}`,
-        debug,
-      };
+      const raw = textOf(historyRaw) ?? "(no message)";
+      const error = looksLikeAuthFailure(raw)
+        ? "Rohlik rejected the login. Double-check your Rohlik email and password. If they're correct, Rohlik may have emailed you to confirm a new login — approve it and try again. Accounts with 2-step verification can't be used this way."
+        : `Rohlik returned an error from "${historyTool}": ${raw}`;
+      return { ok: false, error, debug };
     }
 
     const historyData = extractData(historyRaw);
@@ -223,6 +223,12 @@ function pickTool(
     lowered.every((c) => n.toLowerCase().includes(c))
   );
   return match ?? null;
+}
+
+function looksLikeAuthFailure(text: string): boolean {
+  return /401|403|unauthorized|forbidden|login request failed|access[_ ]token/i.test(
+    text
+  );
 }
 
 function apiErrorMessage(data: unknown): string | null {
