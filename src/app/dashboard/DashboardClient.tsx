@@ -21,15 +21,25 @@ interface Selection {
   qty: number;
 }
 
+const STATUS_TEXT: Record<string, string> = {
+  connected: "Connected to Rohlik.",
+  oauth_init: "Could not start Rohlik sign-in (network?). Please try again.",
+  oauth_state: "Rohlik sign-in could not be verified. Please try again.",
+  oauth_exchange: "Could not complete Rohlik sign-in. Please try again.",
+  oauth_notokens: "Rohlik did not return an access token. Please try again.",
+};
+
 export default function DashboardClient({
   logtoOn,
   userName,
+  connected,
+  status,
 }: {
   logtoOn: boolean;
   userName: string | null;
+  connected: boolean;
+  status: string | null;
 }) {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState(""); // session-only, never persisted
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -44,19 +54,14 @@ export default function DashboardClient({
     setPantry(loadPantry());
   }, []);
 
-  async function handleImport(e: React.FormEvent) {
-    e.preventDefault();
+  async function handleImport() {
     setLoading(true);
     setError(null);
     setOrder(null);
     setDebug(null);
 
     try {
-      const res = await fetch("/api/rohlik/last-order", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      });
+      const res = await fetch("/api/rohlik/last-order", { method: "POST" });
       const data = (await res.json()) as LastOrderResponse;
       setDebug(data.debug ?? null);
 
@@ -84,9 +89,7 @@ export default function DashboardClient({
   }
 
   function setQty(index: number, qty: number) {
-    setSelection((prev) =>
-      prev.map((s, i) => (i === index ? { ...s, qty } : s))
-    );
+    setSelection((prev) => prev.map((s, i) => (i === index ? { ...s, qty } : s)));
   }
 
   function handleAddToPantry() {
@@ -113,6 +116,9 @@ export default function DashboardClient({
     a.name.localeCompare(b.name)
   );
 
+  const statusText = status ? (STATUS_TEXT[status] ?? `Error: ${status}`) : null;
+  const isError = status != null && status !== "connected";
+
   return (
     <main>
       <header
@@ -135,49 +141,50 @@ export default function DashboardClient({
       </header>
       <p className="muted">Import your last Rohlik order into the pantry.</p>
 
+      {statusText && (
+        <p className={isError ? "error" : "notice"}>{statusText}</p>
+      )}
+
       <h2>1 · Connect to Rohlik</h2>
-      <form className="card" onSubmit={handleImport}>
-        <p className="muted" style={{ marginTop: 0, fontSize: "0.85rem" }}>
-          Your Rohlik credentials are used once for this import and are never
-          stored.
-        </p>
-        <div className="row">
-          <div style={{ flex: "1 1 220px" }}>
-            <label htmlFor="email">Rohlik email</label>
-            <input
-              id="email"
-              type="email"
-              autoComplete="off"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-            />
+      <div className="card">
+        {connected ? (
+          <div className="row" style={{ alignItems: "center" }}>
+            <span>✅ Connected to Rohlik.</span>
+            <button
+              className="primary"
+              onClick={handleImport}
+              disabled={loading}
+            >
+              {loading ? "Importing…" : "Import last order"}
+            </button>
+            <a href="/api/rohlik/disconnect" className="muted">
+              Disconnect
+            </a>
           </div>
-          <div style={{ flex: "1 1 220px" }}>
-            <label htmlFor="password">Rohlik password</label>
-            <input
-              id="password"
-              type="password"
-              autoComplete="off"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
+        ) : (
+          <div>
+            <p className="muted" style={{ marginTop: 0, fontSize: "0.85rem" }}>
+              Sign in with your Rohlik account. You authorize on Rohlik&apos;s own
+              page — Spajz never sees your password.
+            </p>
+            <a href="/api/rohlik/oauth/start">
+              <button className="primary">Connect Rohlik</button>
+            </a>
           </div>
-          <button className="primary" type="submit" disabled={loading}>
-            {loading ? "Importing…" : "Import last order"}
-          </button>
-        </div>
+        )}
         {error && (
           <p className="error" style={{ marginBottom: 0 }}>
             {error}
           </p>
         )}
-      </form>
+      </div>
 
       {debug && (
         <details style={{ marginTop: "0.75rem" }}>
-          <summary className="muted" style={{ cursor: "pointer", fontSize: "0.85rem" }}>
+          <summary
+            className="muted"
+            style={{ cursor: "pointer", fontSize: "0.85rem" }}
+          >
             Diagnostics (what Rohlik returned) — copy this if import fails
           </summary>
           <pre

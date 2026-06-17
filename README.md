@@ -11,14 +11,14 @@ its items into a pantry stored in your browser.
 
 ## How it works (MVP)
 
-1. You enter your Rohlik email + password in the UI. They are sent to a Node.js
-   route that connects to `https://mcp.rohlik.cz/mcp` (legacy `rhl-email` /
-   `rhl-pass` header auth), reads your most recent order, and returns its items.
-   **Credentials are used only for that request and are never stored** — not in
-   env vars, not in the database, not in the browser.
-2. You pick which items (and quantities) to add. They go into a pantry kept in
+1. You click **Connect Rohlik** and sign in via **OAuth** on Rohlik's own page —
+   Spajz never sees your password. The access token is kept in an encrypted,
+   HTTP-only cookie.
+2. **Import last order** connects to `https://mcp.rohlik.cz/mcp` with that token,
+   calls `fetch_orders` (limit 1, delivered), and returns the most recent order.
+3. You pick which items (and quantities) to add. They go into a pantry kept in
    `localStorage`.
-3. Re-importing the same order is blocked (imported order IDs are tracked in
+4. Re-importing the same order is blocked (imported order IDs are tracked in
    `localStorage`).
 
 ## Stack

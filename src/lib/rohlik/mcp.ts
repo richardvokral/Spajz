@@ -1,5 +1,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
+import { ROHLIK_MCP_URL } from "./oauth";
 import type {
   LastOrderResponse,
   OrderLineItem,
@@ -7,27 +9,19 @@ import type {
   ToolTrace,
 } from "./types";
 
-const ROHLIK_MCP_URL = "https://mcp.rohlik.cz/mcp";
-
-export interface RohlikCredentials {
-  email: string;
-  password: string;
-}
-
 interface ToolInfo {
   name: string;
   inputSchema?: { properties?: Record<string, unknown> };
 }
 
 /**
- * Connects to the Rohlik MCP server with the legacy header auth, reads the most
+ * Connects to the Rohlik MCP server with an OAuth access token, reads the most
  * recent order and normalizes its line items. Returns a discriminated result
  * plus a diagnostics trace (so silent auth/format failures are visible instead
- * of collapsing into a misleading "no orders" message). Credentials are used
- * only for this call and are never persisted.
+ * of collapsing into a misleading "no orders" message).
  */
 export async function importLastOrder(
-  creds: RohlikCredentials
+  authProvider: OAuthClientProvider
 ): Promise<LastOrderResponse> {
   const debug: RohlikDebug = {
     connected: false,
@@ -36,12 +30,7 @@ export async function importLastOrder(
   };
 
   const transport = new StreamableHTTPClientTransport(new URL(ROHLIK_MCP_URL), {
-    requestInit: {
-      headers: {
-        "rhl-email": creds.email,
-        "rhl-pass": creds.password,
-      },
-    },
+    authProvider,
   });
 
   const client = new Client(
@@ -55,7 +44,7 @@ export async function importLastOrder(
     } catch (err) {
       return {
         ok: false,
-        error: `Could not connect to Rohlik (this usually means wrong credentials or an OAuth-only endpoint): ${msg(err)}`,
+        error: `Could not connect to Rohlik — your session may have expired. Click "Connect Rohlik" to sign in again. (${msg(err)})`,
         debug,
       };
     }
