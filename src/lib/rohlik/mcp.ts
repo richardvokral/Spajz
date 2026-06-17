@@ -80,7 +80,9 @@ export async function importLastOrder(
     debug.historyToolSchema =
       tools.find((t) => t.name === historyTool)?.inputSchema ?? null;
 
-    const historyArgs: Record<string, unknown> = {};
+    // fetch_orders requires at least one search parameter; limit:1 gives the
+    // single most recent (delivered) order.
+    const historyArgs: Record<string, unknown> = { limit: 1 };
     const historyRaw = await callTool(client, historyTool, historyArgs);
     debug.history = trace(historyTool, historyArgs, historyRaw);
     if (isToolError(historyRaw)) {
@@ -91,34 +93,44 @@ export async function importLastOrder(
       };
     }
 
-    const orders = normalizeOrderList(extractData(historyRaw));
+    const historyData = extractData(historyRaw);
+    const apiErr = apiErrorMessage(historyData);
+    if (apiErr) {
+      return {
+        ok: false,
+        error: `Rohlik could not return your orders: ${apiErr}`,
+        debug,
+      };
+    }
+
+    const orders = normalizeOrderList(historyData);
     if (orders.length === 0) {
       return {
         ok: false,
         error:
-          "Connected, but no orders could be read from the history response. This is most often an authentication problem (wrong Rohlik password, or a pending new-login confirmation email), or an unexpected response format. Expand Diagnostics to see what Rohlik actually returned.",
+          "Connected, but no orders could be parsed from the response. Expand Diagnostics to see what Rohlik returned.",
         debug,
       };
     }
 
     const latest = pickLatest(orders);
 
-    // Some history endpoints already embed line items; use them if present.
+    // Use line items embedded in the summary; otherwise fetch the full order by
+    // id (fetch_orders with order_id returns the detailed order).
     let items = normalizeLineItems(latest.raw);
-
     if (items.length === 0) {
-      const detailTool = pickTool(
-        tools,
-        ["get_order_detail", "order_detail", "get_order"],
-        ["order", "detail"]
-      );
-      if (detailTool) {
-        const tool = tools.find((t) => t.name === detailTool);
-        const detailArgs = { [idArgName(tool)]: latest.orderId };
-        const detailRaw = await callTool(client, detailTool, detailArgs);
-        debug.detail = trace(detailTool, detailArgs, detailRaw);
-        if (!isToolError(detailRaw)) {
-          items = normalizeLineItems(extractData(detailRaw));
+      const detailArgs: Record<string, unknown> = {
+        order_id: asIntOrString(latest.orderId),
+      };
+      const detailRaw = await callTool(client, historyTool, detailArgs);
+      debug.detail = trace(historyTool, detailArgs, detailRaw);
+      if (!isToolError(detailRaw)) {
+        const detailData = extractData(detailRaw);
+        if (!apiErrorMessage(detailData)) {
+          const detailOrder = normalizeOrderList(detailData)[0];
+          items = detailOrder
+            ? normalizeLineItems(detailOrder.raw)
+            : normalizeLineItems(detailData);
         }
       }
     }
@@ -213,16 +225,18 @@ function pickTool(
   return match ?? null;
 }
 
-function idArgName(tool: ToolInfo | undefined): string {
-  const props = tool?.inputSchema?.properties;
-  if (props) {
-    for (const k of ["orderId", "order_id", "id", "orderNumber", "number"]) {
-      if (k in props) return k;
-    }
-    const first = Object.keys(props)[0];
-    if (first) return first;
+function apiErrorMessage(data: unknown): string | null {
+  if (isRecord(data) && data.success === false) {
+    return typeof data.message === "string" && data.message.length > 0
+      ? data.message
+      : "the request was rejected";
   }
-  return "orderId";
+  return null;
+}
+
+function asIntOrString(s: string): number | string {
+  const n = Number(s);
+  return Number.isInteger(n) && s.trim() !== "" ? n : s;
 }
 
 function msg(err: unknown): string {
