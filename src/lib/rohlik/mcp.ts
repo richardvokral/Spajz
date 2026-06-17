@@ -69,9 +69,9 @@ export async function importLastOrder(
     debug.historyToolSchema =
       tools.find((t) => t.name === historyTool)?.inputSchema ?? null;
 
-    // fetch_orders requires at least one search parameter; limit:1 gives the
-    // single most recent (delivered) order.
-    const historyArgs: Record<string, unknown> = { limit: 1 };
+    // fetch_orders requires at least one search parameter; fetch a few recent
+    // delivered orders and pick the newest by date (robust to API sort order).
+    const historyArgs: Record<string, unknown> = { limit: 5 };
     const historyRaw = await callTool(client, historyTool, historyArgs);
     debug.history = trace(historyTool, historyArgs, historyRaw);
     if (isToolError(historyRaw)) {
@@ -250,7 +250,9 @@ function normalizeOrderList(data: unknown): RawOrder[] {
   return firstArray(data, ["orders", "items", "data", "history"])
     .map((o) => ({
       orderId: String(pick(o, ["id", "orderId", "order_id", "number"]) ?? ""),
-      orderedAt: asIso(pick(o, ["orderedAt", "createdAt", "date", "created_at"])),
+      orderedAt: asIso(
+        pick(o, ["orderTime", "orderedAt", "createdAt", "date", "created_at"])
+      ),
       raw: o,
     }))
     .filter((o) => o.orderId.length > 0);
@@ -261,8 +263,8 @@ function normalizeLineItems(data: unknown): OrderLineItem[] {
     productId: optStr(pick(it, ["productId", "product_id", "id"])),
     name: String(pick(it, ["name", "productName", "title"]) ?? "Unknown item"),
     quantity: asNumber(pick(it, ["quantity", "amount", "count"]), 1),
-    unit: optStr(pick(it, ["unit", "unitName", "measure"])),
-    price: asNumberOrNull(pick(it, ["price", "unitPrice", "totalPrice"])),
+    unit: optStr(pick(it, ["textualAmount", "unit", "unitName", "measure"])),
+    price: asNumberOrNull(pick(it, ["totalPrice", "price", "unitPrice"])),
   }));
 }
 
