@@ -28,6 +28,7 @@ export default async function DashboardPage({
       : typeof sp.error === "string"
         ? sp.error
         : null;
+  const statusDetail = typeof sp.detail === "string" ? sp.detail : null;
 
   return (
     <DashboardClient
@@ -35,6 +36,7 @@ export default async function DashboardPage({
       userName={userName}
       connected={connected}
       status={status}
+      statusDetail={statusDetail}
     />
   );
 }

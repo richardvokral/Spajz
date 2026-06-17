@@ -36,8 +36,14 @@ export async function GET(req: NextRequest) {
 
   try {
     await transport.finishAuth(code);
-  } catch {
-    return NextResponse.redirect(new URL("/dashboard?error=oauth_exchange", origin));
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    return NextResponse.redirect(
+      new URL(
+        `/dashboard?error=oauth_exchange&detail=${encodeURIComponent(detail.slice(0, 400))}`,
+        origin
+      )
+    );
   } finally {
     await transport.close().catch(() => {});
   }

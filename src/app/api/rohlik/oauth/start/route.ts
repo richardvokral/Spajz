@@ -11,6 +11,15 @@ import { seal } from "@/lib/session";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
+function fail(origin: string, detail: string) {
+  return NextResponse.redirect(
+    new URL(
+      `/dashboard?error=oauth_init&detail=${encodeURIComponent(detail.slice(0, 400))}`,
+      origin
+    )
+  );
+}
+
 export async function GET(req: NextRequest) {
   const origin = req.nextUrl.origin;
   const redirectUri = new URL("/api/rohlik/oauth/callback", origin).toString();
@@ -26,16 +35,22 @@ export async function GET(req: NextRequest) {
 
   // connect() will trigger discovery + dynamic registration + PKCE and capture
   // the authorization URL, then throw because we are not yet authorized.
+  let connectError: string | null = null;
   try {
     await client.connect(transport);
-  } catch {
-    // expected
+  } catch (err) {
+    connectError = err instanceof Error ? err.message : String(err);
   } finally {
     await client.close().catch(() => {});
   }
 
   if (!provider.authorizationUrl) {
-    return NextResponse.redirect(new URL("/dashboard?error=oauth_init", origin));
+    // No auth URL means the SDK never reached the redirect step.
+    return fail(
+      origin,
+      connectError ??
+        "Connected to Rohlik without an OAuth challenge — the server did not ask for sign-in."
+    );
   }
 
   const res = NextResponse.redirect(provider.authorizationUrl.toString());

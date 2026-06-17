@@ -34,11 +34,13 @@ export default function DashboardClient({
   userName,
   connected,
   status,
+  statusDetail,
 }: {
   logtoOn: boolean;
   userName: string | null;
   connected: boolean;
   status: string | null;
+  statusDetail: string | null;
 }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -142,7 +144,21 @@ export default function DashboardClient({
       <p className="muted">Import your last Rohlik order into the pantry.</p>
 
       {statusText && (
-        <p className={isError ? "error" : "notice"}>{statusText}</p>
+        <div className={isError ? "error" : "notice"}>
+          <p style={{ margin: 0 }}>{statusText}</p>
+          {isError && statusDetail && (
+            <pre
+              style={{
+                margin: "0.5rem 0 0",
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+                fontSize: "0.75rem",
+              }}
+            >
+              {statusDetail}
+            </pre>
+          )}
+        </div>
       )}
 
       <h2>1 · Connect to Rohlik</h2>
