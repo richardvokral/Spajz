@@ -11,12 +11,21 @@ export const ROHLIK_MCP_URL = "https://mcp.rohlik.cz/mcp";
 export const OAUTH_COOKIE = "rohlik_oauth"; // transient flow state
 export const SESSION_COOKIE = "rohlik_session"; // tokens
 
+// Rohlik's OAuth only registers loopback redirect URIs (it's built for local
+// MCP clients), so a hosted app uses a manual copy-the-code flow. Override with
+// ROHLIK_OAUTH_REDIRECT if Rohlik rejects this exact value (e.g. try
+// http://127.0.0.1:8765/callback).
+export function loopbackRedirectUri(): string {
+  return process.env.ROHLIK_OAUTH_REDIRECT ?? "http://localhost:8765/callback";
+}
+
 export interface RohlikOAuthState {
   redirectUri: string;
   clientInformation?: OAuthClientInformationMixed;
   codeVerifier?: string;
   state?: string;
   tokens?: OAuthTokens;
+  authUrl?: string;
 }
 
 // What we persist in the SESSION_COOKIE after a successful sign-in.

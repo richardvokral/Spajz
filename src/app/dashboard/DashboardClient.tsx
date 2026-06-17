@@ -33,12 +33,14 @@ export default function DashboardClient({
   logtoOn,
   userName,
   connected,
+  pendingAuthUrl,
   status,
   statusDetail,
 }: {
   logtoOn: boolean;
   userName: string | null;
   connected: boolean;
+  pendingAuthUrl: string | null;
   status: string | null;
   statusDetail: string | null;
 }) {
@@ -176,6 +178,49 @@ export default function DashboardClient({
             <a href="/api/rohlik/disconnect" className="muted">
               Disconnect
             </a>
+          </div>
+        ) : pendingAuthUrl ? (
+          <div>
+            <p style={{ marginTop: 0 }}>
+              <strong>Step 1.</strong> Open the Rohlik sign-in page and log in:
+            </p>
+            <p>
+              <a href={pendingAuthUrl} target="_blank" rel="noreferrer">
+                <button className="primary" type="button">
+                  Open Rohlik sign-in ↗
+                </button>
+              </a>
+            </p>
+            <p className="muted" style={{ fontSize: "0.85rem" }}>
+              After you approve, your browser will try to open a{" "}
+              <code>localhost</code> page that won&apos;t load — that is expected.
+              Copy the <code>code</code> value from that page&apos;s address bar
+              (the part after <code>code=</code>), or paste the whole URL below.
+            </p>
+            <form
+              method="post"
+              action="/api/rohlik/oauth/finish"
+              className="row"
+            >
+              <div style={{ flex: "1 1 320px" }}>
+                <label htmlFor="code">
+                  <strong>Step 2.</strong> Paste the code (or the redirected URL)
+                </label>
+                <input
+                  id="code"
+                  name="code"
+                  type="text"
+                  autoComplete="off"
+                  required
+                />
+              </div>
+              <button className="primary" type="submit">
+                Finish connecting
+              </button>
+              <a href="/api/rohlik/disconnect" className="muted">
+                Cancel
+              </a>
+            </form>
           </div>
         ) : (
           <div>

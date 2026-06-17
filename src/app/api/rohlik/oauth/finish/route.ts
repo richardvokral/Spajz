@@ -12,16 +12,38 @@ import { seal, unseal } from "@/lib/session";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-export async function GET(req: NextRequest) {
+function fail(origin: string, detail: string) {
+  return NextResponse.redirect(
+    new URL(
+      `/dashboard?error=oauth_exchange&detail=${encodeURIComponent(detail.slice(0, 400))}`,
+      origin
+    )
+  );
+}
+
+// The user may paste the bare code or the whole redirected URL.
+function extractCode(input: string): string | null {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+  if (trimmed.includes("code=")) {
+    const match = trimmed.match(/[?&]code=([^&\s]+)/);
+    if (match) return decodeURIComponent(match[1]);
+  }
+  return trimmed;
+}
+
+export async function POST(req: NextRequest) {
   const origin = req.nextUrl.origin;
-  const code = req.nextUrl.searchParams.get("code");
-  const stateParam = req.nextUrl.searchParams.get("state");
+
+  const form = await req.formData();
+  const code = extractCode(String(form.get("code") ?? ""));
 
   const sealed = req.cookies.get(OAUTH_COOKIE)?.value;
   const saved = sealed ? unseal<RohlikOAuthState>(sealed) : null;
 
-  if (!code || !saved?.codeVerifier || saved.state !== stateParam) {
-    return NextResponse.redirect(new URL("/dashboard?error=oauth_state", origin));
+  if (!code) return fail(origin, "No authorization code was provided.");
+  if (!saved?.codeVerifier) {
+    return fail(origin, "Sign-in session expired. Click Connect Rohlik again.");
   }
 
   const provider = new RohlikOAuthProvider({
@@ -37,20 +59,14 @@ export async function GET(req: NextRequest) {
   try {
     await transport.finishAuth(code);
   } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
-    return NextResponse.redirect(
-      new URL(
-        `/dashboard?error=oauth_exchange&detail=${encodeURIComponent(detail.slice(0, 400))}`,
-        origin
-      )
-    );
+    return fail(origin, err instanceof Error ? err.message : String(err));
   } finally {
     await transport.close().catch(() => {});
   }
 
   const tokens = provider.snapshot.tokens;
   if (!tokens) {
-    return NextResponse.redirect(new URL("/dashboard?error=oauth_notokens", origin));
+    return fail(origin, "Token exchange returned no tokens.");
   }
 
   const res = NextResponse.redirect(new URL("/dashboard?connected=1", origin));

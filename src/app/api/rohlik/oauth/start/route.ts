@@ -5,6 +5,7 @@ import {
   OAUTH_COOKIE,
   ROHLIK_MCP_URL,
   RohlikOAuthProvider,
+  loopbackRedirectUri,
 } from "@/lib/rohlik/oauth";
 import { seal } from "@/lib/session";
 
@@ -22,7 +23,7 @@ function fail(origin: string, detail: string) {
 
 export async function GET(req: NextRequest) {
   const origin = req.nextUrl.origin;
-  const redirectUri = new URL("/api/rohlik/oauth/callback", origin).toString();
+  const redirectUri = loopbackRedirectUri();
   const provider = new RohlikOAuthProvider({ redirectUri });
 
   const transport = new StreamableHTTPClientTransport(new URL(ROHLIK_MCP_URL), {
@@ -33,8 +34,8 @@ export async function GET(req: NextRequest) {
     { capabilities: {} }
   );
 
-  // connect() will trigger discovery + dynamic registration + PKCE and capture
-  // the authorization URL, then throw because we are not yet authorized.
+  // connect() triggers discovery + dynamic registration + PKCE and captures the
+  // authorization URL, then throws because we are not yet authorized.
   let connectError: string | null = null;
   try {
     await client.connect(transport);
@@ -45,7 +46,6 @@ export async function GET(req: NextRequest) {
   }
 
   if (!provider.authorizationUrl) {
-    // No auth URL means the SDK never reached the redirect step.
     return fail(
       origin,
       connectError ??
@@ -53,7 +53,8 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  const res = NextResponse.redirect(provider.authorizationUrl.toString());
+  // Stash the flow state + auth URL; the dashboard renders the paste-the-code UI.
+  const res = NextResponse.redirect(new URL("/dashboard", origin));
   res.cookies.set(
     OAUTH_COOKIE,
     seal({
@@ -61,13 +62,14 @@ export async function GET(req: NextRequest) {
       clientInformation: provider.snapshot.clientInformation,
       codeVerifier: provider.snapshot.codeVerifier,
       state: provider.snapshot.state,
+      authUrl: provider.authorizationUrl.toString(),
     }),
     {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
       path: "/",
-      maxAge: 600,
+      maxAge: 900,
     }
   );
   return res;
