@@ -16,4 +16,6 @@ export interface RohlikDebug {
   historyToolSchema?: unknown;
   history?: ToolTrace;
   detail?: ToolTrace;
+  categoryTool?: string | null; // tool used to fetch product categories
+  productSample?: string | null; // raw sample of a product record (to confirm shapes)
 }

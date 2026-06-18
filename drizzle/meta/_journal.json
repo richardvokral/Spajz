@@ -8,6 +8,13 @@
       "when": 1781730107204,
       "tag": "0000_previous_captain_stacy",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1781770181627,
+      "tag": "0001_parched_shape",
+      "breakpoints": true
     }
   ]
 }

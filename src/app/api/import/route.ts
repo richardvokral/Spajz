@@ -12,6 +12,7 @@ import { seal, unseal } from "@/lib/session";
 import { getDb, isDbConfigured } from "@/lib/db";
 import { importLogs } from "@/lib/schema";
 import { ingestOrders } from "@/lib/pantry/ingest";
+import { runCategorization } from "@/lib/category/runCategorization";
 import { getSettings } from "@/lib/settings";
 import { isAiConfigured } from "@/lib/ai/client";
 import { aiExtractOrders } from "@/lib/ai/parseFallback";
@@ -100,6 +101,18 @@ export async function POST(req: NextRequest) {
       const latest = newestOrder(imp.orders);
       const toIngest = kind === "last" ? (latest ? [latest] : []) : imp.orders;
       const ingest = await ingestOrders(toIngest);
+
+      let catNote = "";
+      try {
+        const cat = await runCategorization({ db, authProvider: provider, settings });
+        catNote = ` · categorized: mcp ${cat.mcpFetched}, ai ${cat.aiCategorized}, fallback ${cat.fallbackCategorized}`;
+        if (cat.errors.length) {
+          catNote += ` · cat errors: ${cat.errors.slice(0, 2).join("; ")}`;
+        }
+      } catch (e) {
+        catNote = ` · categorize failed: ${e instanceof Error ? e.message : String(e)}`;
+      }
+
       await db
         .update(importLogs)
         .set({
@@ -107,6 +120,7 @@ export async function POST(req: NextRequest) {
           ordersSeen: ingest.ordersSeen,
           ordersImported: ingest.ordersImported,
           itemsImported: ingest.itemsImported,
+          message: catNote || null,
           finishedAt: new Date(),
         })
         .where(eq(importLogs.id, logId));

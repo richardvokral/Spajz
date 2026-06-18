@@ -25,6 +25,7 @@ interface Status {
     aiCategorizationEnabled: boolean;
     aiParseFallbackEnabled: boolean;
     aiModel: string;
+    pantryQuantityMode: string;
   } | null;
   importLogs: ImportLogRow[];
 }
@@ -35,11 +36,13 @@ export default function AdminClient() {
   const [status, setStatus] = useState<Status | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const [catDebug, setCatDebug] = useState<string | null>(null);
 
   // local settings form
   const [aiCat, setAiCat] = useState(false);
   const [aiParse, setAiParse] = useState(false);
   const [model, setModel] = useState("claude-opus-4-8");
+  const [qtyMode, setQtyMode] = useState("package");
 
   const load = useCallback(async () => {
     const res = await fetch("/api/admin/status");
@@ -49,6 +52,7 @@ export default function AdminClient() {
       setAiCat(data.settings.aiCategorizationEnabled);
       setAiParse(data.settings.aiParseFallbackEnabled);
       setModel(data.settings.aiModel);
+      setQtyMode(data.settings.pantryQuantityMode ?? "package");
     }
   }, []);
 
@@ -68,6 +72,15 @@ export default function AdminClient() {
         setMsg(
           `${label}: ${data.ordersImported} order(s), ${data.itemsImported} item(s) imported (saw ${data.ordersSeen}).`
         );
+      } else if (data && typeof data.aiCategorized === "number") {
+        setMsg(
+          `${label}: Rohlik ${data.mcpFetched}, AI ${data.aiCategorized}, fallback ${data.fallbackCategorized}` +
+            (data.errors?.length ? ` · errors: ${data.errors.join("; ")}` : "") +
+            (data.connectedToRohlik === false
+              ? " · (not connected to Rohlik — Rohlik categories skipped)"
+              : "")
+        );
+        setCatDebug(data.debugSample ?? null);
       } else {
         setMsg(`${label}: done.`);
       }
@@ -166,6 +179,18 @@ export default function AdminClient() {
             </option>
           ))}
         </select>
+        <label htmlFor="qtyMode" style={{ marginTop: "0.75rem" }}>
+          Pantry quantity display
+        </label>
+        <select
+          id="qtyMode"
+          value={qtyMode}
+          onChange={(e) => setQtyMode(e.target.value)}
+          style={{ padding: "0.4rem", borderRadius: 6, border: "1px solid var(--border)" }}
+        >
+          <option value="package">Per package (count of boxes)</option>
+          <option value="content">By content amount (parsed size)</option>
+        </select>
         <div style={{ marginTop: "0.75rem" }}>
           <button
             className="primary"
@@ -176,6 +201,7 @@ export default function AdminClient() {
                   aiCategorizationEnabled: aiCat,
                   aiParseFallbackEnabled: aiParse,
                   aiModel: model,
+                  pantryQuantityMode: qtyMode,
                 })
               )
             }
@@ -183,6 +209,41 @@ export default function AdminClient() {
             Save settings
           </button>
         </div>
+      </div>
+
+      <h2>Categorization</h2>
+      <div className="card">
+        <p className="muted" style={{ marginTop: 0, fontSize: "0.85rem" }}>
+          Fetch Rohlik categories (needs a connected Rohlik session) and assign AI
+          categories to every product that doesn&apos;t have one yet. Safe to run
+          repeatedly.
+        </p>
+        <button
+          className="primary"
+          disabled={!status?.dbConfigured || busy !== null}
+          onClick={() => act("Run categorization", () => post("/api/admin/categorize"))}
+        >
+          {busy === "Run categorization" ? "Categorizing…" : "Run categorization"}
+        </button>
+        {catDebug && (
+          <details style={{ marginTop: "0.75rem" }}>
+            <summary className="muted" style={{ cursor: "pointer", fontSize: "0.85rem" }}>
+              Rohlik product sample (confirm category field names)
+            </summary>
+            <pre
+              style={{
+                overflow: "auto",
+                fontSize: "0.72rem",
+                background: "#fff",
+                border: "1px solid var(--border)",
+                borderRadius: "6px",
+                padding: "0.75rem",
+              }}
+            >
+              {catDebug}
+            </pre>
+          </details>
+        )}
       </div>
 
       <h2>Imports</h2>

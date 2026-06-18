@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { isDbConfigured } from "@/lib/db";
-import { AI_MODELS, saveSettings } from "@/lib/settings";
+import { AI_MODELS, PANTRY_QUANTITY_MODES, saveSettings } from "@/lib/settings";
 
 export const runtime = "nodejs";
 
@@ -9,6 +9,7 @@ const Body = z.object({
   aiCategorizationEnabled: z.boolean().optional(),
   aiParseFallbackEnabled: z.boolean().optional(),
   aiModel: z.enum(AI_MODELS).optional(),
+  pantryQuantityMode: z.enum(PANTRY_QUANTITY_MODES).optional(),
 });
 
 export async function POST(req: Request) {

@@ -2,16 +2,20 @@ import { eq } from "drizzle-orm";
 import { getDb } from "./db";
 import { settings } from "./schema";
 
+export type PantryQuantityMode = "package" | "content";
+
 export interface AppSettings {
   aiCategorizationEnabled: boolean;
   aiParseFallbackEnabled: boolean;
   aiModel: string;
+  pantryQuantityMode: PantryQuantityMode;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
   aiCategorizationEnabled: false,
   aiParseFallbackEnabled: false,
   aiModel: "claude-opus-4-8",
+  pantryQuantityMode: "package",
 };
 
 export const AI_MODELS = [
@@ -19,6 +23,8 @@ export const AI_MODELS = [
   "claude-sonnet-4-6",
   "claude-haiku-4-5",
 ] as const;
+
+export const PANTRY_QUANTITY_MODES = ["package", "content"] as const;
 
 export async function getSettings(): Promise<AppSettings> {
   const db = getDb();
@@ -29,6 +35,7 @@ export async function getSettings(): Promise<AppSettings> {
     aiCategorizationEnabled: row.aiCategorizationEnabled,
     aiParseFallbackEnabled: row.aiParseFallbackEnabled,
     aiModel: row.aiModel,
+    pantryQuantityMode: (row.pantryQuantityMode as PantryQuantityMode) ?? "package",
   };
 }
 

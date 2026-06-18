@@ -7,7 +7,6 @@ import {
   importLogs,
   orderItems,
   orders,
-  pantryItems,
   priceHistory,
   products,
 } from "@/lib/schema";
@@ -57,7 +56,6 @@ export async function GET() {
       orders: await countOf(db, orders),
       orderItems: await countOf(db, orderItems),
       priceHistory: await countOf(db, priceHistory),
-      pantryItems: await countOf(db, pantryItems),
     };
     settings = await getSettings();
     logs = await db

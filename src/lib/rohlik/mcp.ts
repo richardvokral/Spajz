@@ -175,6 +175,195 @@ export function newestOrder(orders: NormalizedOrder[]): NormalizedOrder | null {
   return orders[0];
 }
 
+export const MCP_CATEGORY_MAX = 80;
+
+export interface ProductCategory {
+  category: string;
+  path: string;
+}
+
+/**
+ * Fetches Rohlik product categories for the given product ids. Defensive: tries
+ * a batch tool first, else per-product `get_product_details`, and tolerates
+ * unknown response shapes. Returns a map (only for products where a category was
+ * found) plus a debug sample so field names can be confirmed on a live run.
+ */
+export async function fetchProductCategories(
+  authProvider: OAuthClientProvider,
+  productIds: string[]
+): Promise<{ map: Record<string, ProductCategory>; debug: RohlikDebug }> {
+  const debug: RohlikDebug = {
+    connected: false,
+    toolNames: [],
+    historyTool: null,
+  };
+  const map: Record<string, ProductCategory> = {};
+  if (productIds.length === 0) return { map, debug };
+
+  const transport = new StreamableHTTPClientTransport(new URL(ROHLIK_MCP_URL), {
+    authProvider,
+  });
+  const client = new Client(
+    { name: "spajz", version: "0.1.0" },
+    { capabilities: {} }
+  );
+
+  try {
+    try {
+      await client.connect(transport);
+    } catch {
+      return { map, debug };
+    }
+    debug.connected = true;
+
+    let tools: ToolInfo[] = [];
+    try {
+      const listed = await client.listTools();
+      tools = (listed.tools ?? []) as ToolInfo[];
+      debug.toolNames = tools.map((t) => t.name);
+    } catch {
+      // ignore
+    }
+
+    let sampled = false;
+    const sample = (raw: ToolResult) => {
+      if (sampled) return;
+      const t = textOf(raw);
+      try {
+        debug.productSample = (
+          t ?? JSON.stringify(raw.structuredContent ?? raw)
+        ).slice(0, 2000);
+      } catch {
+        debug.productSample = "[unserializable]";
+      }
+      sampled = true;
+    };
+
+    // 1. Try a batch tool.
+    const batchTool = pickTool(
+      tools,
+      ["get_products_composition_batch", "batch_search_products"],
+      ["batch", "product"]
+    );
+    if (batchTool) {
+      debug.categoryTool = batchTool;
+      for (const argKey of ["product_ids", "productIds", "ids", "products"]) {
+        try {
+          const raw = await callTool(client, batchTool, {
+            [argKey]: productIds.map(numericIfPossible),
+          });
+          if (isToolError(raw)) continue;
+          const recs = productRecords(raw);
+          if (recs.length > 0) {
+            for (const rec of recs) extractCategory(map, rec);
+            sample(raw);
+            break;
+          }
+        } catch {
+          // try next arg key
+        }
+      }
+    }
+
+    // 2. Per-product fallback (bounded).
+    const missing = productIds.filter((id) => !map[id]).slice(0, MCP_CATEGORY_MAX);
+    if (missing.length > 0) {
+      const detailTool = pickTool(
+        tools,
+        ["get_product_details", "get_product", "product_details"],
+        ["product", "detail"]
+      );
+      if (detailTool) {
+        debug.categoryTool = debug.categoryTool ?? detailTool;
+        for (const id of missing) {
+          for (const argKey of ["productId", "product_id", "id"]) {
+            try {
+              const raw = await callTool(client, detailTool, {
+                [argKey]: numericIfPossible(id),
+              });
+              if (isToolError(raw)) continue;
+              const recs = productRecords(raw);
+              const rec =
+                recs.find(
+                  (r) =>
+                    String(pick(r, ["id", "productId", "product_id"]) ?? "") === id
+                ) ?? recs[0];
+              if (rec) {
+                sample(raw);
+                const had = Boolean(map[id]);
+                extractCategory(map, rec, id);
+                if (!had && map[id]) break;
+              }
+            } catch {
+              // try next arg key
+            }
+          }
+        }
+      }
+    }
+
+    return { map, debug };
+  } finally {
+    await client.close().catch(() => {});
+  }
+}
+
+function numericIfPossible(s: string): number | string {
+  const n = Number(s);
+  return Number.isInteger(n) && s.trim() !== "" ? n : s;
+}
+
+function productRecords(raw: ToolResult): Record<string, unknown>[] {
+  for (const c of candidates(raw)) {
+    const arr = firstArray(c, ["products", "items", "data", "results"]);
+    if (arr.length > 0) return arr;
+    if (isRecord(c)) {
+      const p = c["product"];
+      if (isRecord(p)) return [p];
+      if (c["categories"] !== undefined || c["id"] !== undefined) return [c];
+    }
+  }
+  return [];
+}
+
+function categoryOf(rec: Record<string, unknown>): ProductCategory | null {
+  const cats = pick(rec, ["categories", "categoryPath", "category"]);
+  if (Array.isArray(cats)) {
+    const named = cats
+      .filter(isRecord)
+      .map((o) => ({
+        level: asNumberOrNull(pick(o, ["level"])),
+        name: optStr(pick(o, ["name", "title"])),
+      }))
+      .filter((o): o is { level: number | null; name: string } => Boolean(o.name));
+    if (named.length > 0) {
+      const path = named.map((n) => n.name).join(" > ");
+      const lvl1 = named.find((n) => n.level === 1);
+      const nonZero = [...named].reverse().find((n) => n.level !== 0);
+      const category = lvl1?.name ?? nonZero?.name ?? named[named.length - 1].name;
+      return { category, path };
+    }
+    const strs = cats.map(optStr).filter((s): s is string => Boolean(s));
+    if (strs.length > 0) {
+      return { category: strs[strs.length - 1], path: strs.join(" > ") };
+    }
+    return null;
+  }
+  const s = optStr(cats);
+  return s ? { category: s, path: s } : null;
+}
+
+function extractCategory(
+  map: Record<string, ProductCategory>,
+  rec: Record<string, unknown>,
+  fallbackId?: string
+): void {
+  const id = String(pick(rec, ["id", "productId", "product_id"]) ?? fallbackId ?? "");
+  if (!id) return;
+  const cat = categoryOf(rec);
+  if (cat?.category) map[id] = cat;
+}
+
 // --- Normalization (Rohlik fetch_orders shape; see docs/rohlik-mcp.md) ---
 
 function toNormalizedOrder(raw: Record<string, unknown>): NormalizedOrder {

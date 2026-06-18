@@ -30,6 +30,8 @@ export const products = pgTable("products", {
   unit: text("unit"),
   categoryId: uuid("category_id").references(() => categories.id),
   aiCategorized: boolean("ai_categorized").default(false).notNull(),
+  mcpCategory: text("mcp_category"),
+  mcpCategoryPath: text("mcp_category_path"),
   firstSeenAt: ts("first_seen_at").defaultNow().notNull(),
   lastSeenAt: ts("last_seen_at").defaultNow().notNull(),
   updatedAt: ts("updated_at").defaultNow().notNull(),
@@ -98,6 +100,7 @@ export const settings = pgTable("settings", {
     .default(false)
     .notNull(),
   aiModel: text("ai_model").default("claude-opus-4-8").notNull(),
+  pantryQuantityMode: text("pantry_quantity_mode").default("package").notNull(),
   updatedAt: ts("updated_at").defaultNow().notNull(),
 });
 

@@ -3,11 +3,26 @@
 import { useCallback, useEffect, useState } from "react";
 import type { RohlikDebug } from "@/lib/rohlik/types";
 
-interface PantryRow {
-  category: string | null;
-  quantity: string;
+interface PantryItem {
+  name: string;
+  mcpCategory: string | null;
+  packageCount: number;
+  contentAmount: number | null;
+  contentUnit: string | null;
+  textualAmount: string | null;
   unit: string | null;
   lastBought: string | null;
+}
+
+interface PantryCategory {
+  category: string;
+  packageTotal: number;
+  content: { unit: string; amount: number }[];
+  items: PantryItem[];
+}
+
+function formatContent(content: { unit: string; amount: number }[]): string {
+  return content.map((c) => `${c.amount} ${c.unit}`).join(" · ");
 }
 
 const STATUS_TEXT: Record<string, string> = {
@@ -39,7 +54,8 @@ export default function DashboardClient({
   const [debug, setDebug] = useState<RohlikDebug | null>(null);
   const [copied, setCopied] = useState(false);
 
-  const [pantry, setPantry] = useState<PantryRow[]>([]);
+  const [pantry, setPantry] = useState<PantryCategory[]>([]);
+  const [mode, setMode] = useState<"package" | "content">("package");
   const [pantryReady, setPantryReady] = useState(false);
   const [dbConfigured, setDbConfigured] = useState(true);
 
@@ -48,7 +64,8 @@ export default function DashboardClient({
       const res = await fetch("/api/pantry");
       const data = await res.json();
       setDbConfigured(Boolean(data.dbConfigured));
-      setPantry(Array.isArray(data.items) ? data.items : []);
+      setPantry(Array.isArray(data.categories) ? data.categories : []);
+      setMode(data.pantryQuantityMode === "content" ? "content" : "package");
     } catch {
       setPantry([]);
     } finally {
@@ -233,28 +250,53 @@ export default function DashboardClient({
           DB migrations in the admin first.
         </p>
       ) : (
-        <div className="card">
-          <table>
-            <thead>
-              <tr>
-                <th>Category</th>
-                <th className="num">Qty</th>
-                <th>Unit</th>
-                <th>Last bought</th>
-              </tr>
-            </thead>
-            <tbody>
-              {pantry.map((p, i) => (
-                <tr key={i}>
-                  <td>{p.category ?? "Uncategorized"}</td>
-                  <td className="num">{p.quantity}</td>
-                  <td>{p.unit ?? ""}</td>
-                  <td>{p.lastBought ? new Date(p.lastBought).toLocaleDateString() : ""}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <>
+          <p className="muted" style={{ fontSize: "0.85rem", marginTop: 0 }}>
+            Showing <strong>{mode === "content" ? "content amount" : "package count"}</strong>{" "}
+            (change in <a href="/admin">admin</a>).
+          </p>
+          {pantry.map((cat) => (
+            <div className="card" key={cat.category} style={{ marginBottom: "0.75rem" }}>
+              <div
+                style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}
+              >
+                <h3 style={{ margin: 0, fontSize: "1.05rem" }}>{cat.category}</h3>
+                <span className="muted" style={{ fontSize: "0.85rem" }}>
+                  {mode === "content" && cat.content.length > 0
+                    ? formatContent(cat.content)
+                    : `${cat.packageTotal} pkg`}
+                </span>
+              </div>
+              <table style={{ marginTop: "0.5rem" }}>
+                <tbody>
+                  {cat.items.map((it, i) => (
+                    <tr key={i}>
+                      <td>
+                        {it.name}
+                        {it.mcpCategory && (
+                          <span className="muted" style={{ fontSize: "0.72rem" }}>
+                            {" "}
+                            · {it.mcpCategory}
+                          </span>
+                        )}
+                      </td>
+                      <td className="num">
+                        {mode === "content" && it.contentAmount != null
+                          ? `${it.contentAmount} ${it.contentUnit}`
+                          : `${it.packageCount} × ${it.textualAmount ?? it.unit ?? "?"}`}
+                      </td>
+                      <td style={{ fontSize: "0.75rem" }} className="muted">
+                        {it.lastBought
+                          ? new Date(it.lastBought).toLocaleDateString()
+                          : ""}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ))}
+        </>
       )}
     </main>
   );
