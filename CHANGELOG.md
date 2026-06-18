@@ -3,10 +3,25 @@
 All notable changes to Spajz are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are aligned
-with the build phases (`0.1.0` MVP → `0.2.0` Phase 2 → `0.2.1` Phase 2.1). The
-version in `package.json` tracks the latest released heading here.
+with the build phases (`0.1.0` MVP → `0.2.0` Phase 2 → `0.2.1` Phase 2.1 →
+`0.3.0` Phase 3a). The version in `package.json` tracks the latest released
+heading here.
 
-## [Unreleased]
+## [0.3.0] - 2026-06-18 — Phase 3a (dashboard insights + Ask my pantry)
+
+### Added
+- **Dashboard insights**: headline stats (average purchase, total purchases,
+  total spent, favourite weekday) plus mobile-first, responsive **SVG charts** —
+  spending per month and purchases per month (last 6 months) and purchases by
+  weekday. New `GET /api/metrics`; hand-rolled charts in `src/components/Charts.tsx`
+  (no charting dependency).
+- **Ask my pantry** (`/ask`): ask a question in plain language → the AI writes a
+  **read-only SQL** query, the server guards and runs it, then the AI explains the
+  result with an optional **adjustable chart** (bar / line / table). New
+  `POST /api/ask`; requires `ANTHROPIC_API_KEY`. The generated SQL is guarded
+  (SELECT/WITH only, single statement, no write/DDL keywords, system tables
+  blocked, wrapped `LIMIT 500`).
+- Explicit mobile-first `viewport` and a metrics/stat/chart style block.
 
 ### Changed
 - Docs policy: doc/changelog updates are always committed **and pushed** together

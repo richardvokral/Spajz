@@ -2,6 +2,18 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { RohlikDebug } from "@/lib/rohlik/types";
+import { BarChart } from "@/components/Charts";
+
+interface Metrics {
+  dbConfigured: boolean;
+  currency: string;
+  monthly: { month: string; label: string; total: number; count: number }[];
+  avgOrderValue: number;
+  totalOrders: number;
+  totalSpent: number;
+  favouriteDay: { day: string; count: number } | null;
+  byWeekday: { day: string; count: number }[];
+}
 
 interface PantryItem {
   name: string;
@@ -23,6 +35,10 @@ interface PantryCategory {
 
 function formatContent(content: { unit: string; amount: number }[]): string {
   return content.map((c) => `${c.amount} ${c.unit}`).join(" · ");
+}
+
+function money(amount: number, currency: string): string {
+  return `${Math.round(amount).toLocaleString("en-US")} ${currency}`;
 }
 
 const STATUS_TEXT: Record<string, string> = {
@@ -58,6 +74,7 @@ export default function DashboardClient({
   const [mode, setMode] = useState<"package" | "content">("package");
   const [pantryReady, setPantryReady] = useState(false);
   const [dbConfigured, setDbConfigured] = useState(true);
+  const [metrics, setMetrics] = useState<Metrics | null>(null);
 
   const loadPantry = useCallback(async () => {
     try {
@@ -73,9 +90,20 @@ export default function DashboardClient({
     }
   }, []);
 
+  const loadMetrics = useCallback(async () => {
+    try {
+      const res = await fetch("/api/metrics");
+      const data = (await res.json()) as Metrics;
+      setMetrics(data);
+    } catch {
+      setMetrics(null);
+    }
+  }, []);
+
   useEffect(() => {
     loadPantry();
-  }, [loadPantry]);
+    loadMetrics();
+  }, [loadPantry, loadMetrics]);
 
   async function handleImport() {
     setLoading(true);
@@ -97,7 +125,7 @@ export default function DashboardClient({
       setNote(
         `Imported ${data.ordersImported} order(s), ${data.itemsImported} item(s).`
       );
-      await loadPantry();
+      await Promise.all([loadPantry(), loadMetrics()]);
     } catch {
       setError("Network error talking to the server.");
     } finally {
@@ -115,6 +143,8 @@ export default function DashboardClient({
       >
         <h1>Spajz</h1>
         <span className="muted" style={{ fontSize: "0.85rem" }}>
+          <a href="/ask">Ask my pantry</a>
+          {" · "}
           <a href="/admin">Admin</a>
           {" · "}
           {logtoOn ? (
@@ -234,6 +264,56 @@ export default function DashboardClient({
             {JSON.stringify(debug, null, 2)}
           </pre>
         </details>
+      )}
+
+      {metrics && metrics.dbConfigured && metrics.totalOrders > 0 && (
+        <>
+          <h2>Insights</h2>
+          <div className="metrics-grid">
+            <div className="stat">
+              <span className="stat-num">{money(metrics.avgOrderValue, metrics.currency)}</span>
+              <span className="muted stat-label">Average purchase</span>
+            </div>
+            <div className="stat">
+              <span className="stat-num">{metrics.totalOrders}</span>
+              <span className="muted stat-label">Total purchases</span>
+            </div>
+            <div className="stat">
+              <span className="stat-num">{money(metrics.totalSpent, metrics.currency)}</span>
+              <span className="muted stat-label">Total spent</span>
+            </div>
+            <div className="stat">
+              <span className="stat-num">{metrics.favouriteDay?.day ?? "—"}</span>
+              <span className="muted stat-label">
+                Favourite day{metrics.favouriteDay ? ` (${metrics.favouriteDay.count}×)` : ""}
+              </span>
+            </div>
+          </div>
+
+          <div className="chart card">
+            <strong style={{ fontSize: "0.95rem" }}>Spending — last 6 months</strong>
+            <div style={{ marginTop: "0.5rem" }}>
+              <BarChart
+                points={metrics.monthly.map((m) => ({ label: m.label, value: m.total }))}
+                valueFormat={(v) => money(v, metrics.currency)}
+              />
+            </div>
+          </div>
+
+          <div className="chart card" style={{ marginTop: "0.75rem" }}>
+            <strong style={{ fontSize: "0.95rem" }}>Purchases per month</strong>
+            <div style={{ marginTop: "0.5rem" }}>
+              <BarChart points={metrics.monthly.map((m) => ({ label: m.label, value: m.count }))} />
+            </div>
+          </div>
+
+          <div className="chart card" style={{ marginTop: "0.75rem" }}>
+            <strong style={{ fontSize: "0.95rem" }}>Purchases by weekday</strong>
+            <div style={{ marginTop: "0.5rem" }}>
+              <BarChart points={metrics.byWeekday.map((d) => ({ label: d.day, value: d.count }))} />
+            </div>
+          </div>
+        </>
       )}
 
       <h2>Pantry</h2>

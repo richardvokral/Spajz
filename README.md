@@ -1,4 +1,4 @@
-# Spajz · v0.2.1
+# Spajz · v0.3.0
 
 A home pantry tracker that talks to the [Rohlik](https://www.rohlik.cz) grocery
 store's MCP server. Connect your Rohlik account, import your order history, and
@@ -25,6 +25,24 @@ version history.
 3. **Pantry** — the dashboard lists **individual products grouped by category**.
    Each product shows either a **package count** or a **parsed content amount**
    (e.g. grams/ml/pcs) — switchable in the admin.
+4. **Insights** — the dashboard also shows headline stats (average purchase,
+   total purchases, total spent, favourite weekday) and mobile-first responsive
+   charts: spending and purchases per month (last 6 months) and purchases by
+   weekday. Served by `GET /api/metrics`; charts are hand-rolled SVG
+   (`src/components/Charts.tsx`), no charting dependency.
+5. **Ask my pantry** (`/ask`) — ask a question in plain language; the AI writes a
+   **read-only SQL** query, the server guards and runs it, then the AI explains
+   the result with an optional adjustable chart (bar / line / table).
+
+### Ask my pantry
+
+`/ask` turns a natural-language question into a single read-only SQL query via
+Anthropic (`POST /api/ask`, needs `ANTHROPIC_API_KEY`). The generated SQL is
+**guarded** before it runs: `SELECT`/`WITH` only, a single statement, no
+write/DDL keywords, system/catalog tables blocked, and wrapped in a `LIMIT 500`.
+The result rows are sent back to the model to produce the answer (and an optional
+chart spec). Data is a single user's grocery history; the guard keeps it
+read-only.
 
 ### Categories
 
@@ -64,9 +82,11 @@ npm run dev                  # http://localhost:3000
 - **`DATABASE_URL`** — Neon Postgres. **Required** for the pantry, imports and the
   admin console. Apply the schema from **/admin → Apply migrations** (or
   `npm run db:migrate`).
-- **`ANTHROPIC_API_KEY`** *(optional)* — enables AI product auto-categorization and
-  the parse-fallback. Both must also be toggled on in **/admin → AI**. Default
-  model `claude-opus-4-8` (switchable to `claude-sonnet-4-6` / `claude-haiku-4-5`).
+- **`ANTHROPIC_API_KEY`** *(optional)* — enables AI product auto-categorization,
+  the parse-fallback, and **Ask my pantry** (`/ask`). Categorization and the
+  parse-fallback must also be toggled on in **/admin → AI**; Ask my pantry works
+  whenever the key is set. Default model `claude-opus-4-8` (switchable to
+  `claude-sonnet-4-6` / `claude-haiku-4-5`).
 - **`ROHLIK_TOKEN_SECRET`** *(prod)* — encrypts the Rohlik token cookie.
 - **`ROHLIK_OAUTH_REDIRECT`** *(optional)* — loopback redirect URI (default
   `http://localhost:8765/callback`).

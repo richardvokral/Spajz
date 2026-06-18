@@ -14,3 +14,18 @@ export function getDb() {
   if (!url) throw new Error("DATABASE_URL is not set");
   return drizzle(neon(url), { schema });
 }
+
+/** Normalize a `db.execute()` result to a rows array (neon-http returns an
+ * array or `{ rows }` depending on the statement). */
+export function rowsOf(res: unknown): Record<string, unknown>[] {
+  if (Array.isArray(res)) return res as Record<string, unknown>[];
+  if (
+    res &&
+    typeof res === "object" &&
+    "rows" in res &&
+    Array.isArray((res as { rows: unknown }).rows)
+  ) {
+    return (res as { rows: Record<string, unknown>[] }).rows;
+  }
+  return [];
+}
