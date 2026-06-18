@@ -48,7 +48,7 @@ The server implements OAuth with **discovery + Dynamic Client Registration (DCR)
 | Begin flow, capture auth URL | `src/app/api/rohlik/oauth/start/route.ts` |
 | Exchange the pasted code for tokens | `src/app/api/rohlik/oauth/finish/route.ts` |
 | Disconnect (clear cookies) | `src/app/api/rohlik/disconnect/route.ts` |
-| Use the token to call tools | `src/lib/rohlik/mcp.ts` (`importLastOrder`) |
+| Use the token to call tools | `src/lib/rohlik/mcp.ts` (`importOrders` / `newestOrder`) |
 
 Env vars: `ROHLIK_TOKEN_SECRET` (cookie encryption key, 32+ chars),
 `ROHLIK_OAUTH_REDIRECT` (override the loopback URI). Tokens live in the encrypted
@@ -191,6 +191,44 @@ We call `{ limit: 5 }` and pick the order with the newest `orderTime`.
 | line `price` | `item.totalPrice` |
 | line `quantity` | not in `items[]` → defaults to 1 (real count is in `warrantyInfo.enabledData[].pieces` for eligible items) |
 
+### Units / amounts (how the app reads them)
+
+There are three different per-line numbers and mixing them reads wrong:
+
+- `unit` — Rohlik's **pricing measure** (`kg` / `piece` / `l`), not a count.
+- `textualAmount` — the **package size** as a label (`"200 g"`, `"6 ks"`,
+  `"0,75 l"`).
+- there is **no per-line bought count** in `items[]`; the real count only appears
+  in `warrantyInfo.enabledData[].pieces` for warranty-eligible items.
+
+So the app shows `N × size` (count × `textualAmount`) and, for `content` mode,
+parses `textualAmount` into `{amount, unit: 'pcs' | 'g' | 'ml'}` via
+`src/lib/pantry/parseAmount.ts` (Czech comma decimals; `kg→g×1000`, `l→ml×1000`,
+`ks→pcs`). Unparseable labels (e.g. `2x100 g`, ranges) fall back to package mode.
+
+## Product categories (Phase 2.1) _(shape partly unconfirmed — defensive)_
+
+Each product gets two categories: a **Rohlik (MCP) category** and an **AI
+category**. Stored on `products` as `mcp_category` / `mcp_category_path` and
+`category_id` (AI). The AI category is primary; the Rohlik category is fed to the
+AI as a hint and used as the **fallback** when AI is off/unavailable. The
+orchestrator is `src/lib/category/runCategorization.ts` (MCP fetch → AI →
+Rohlik-category fallback, each step best-effort).
+
+`fetchProductCategories(authProvider, productIds)` in `src/lib/rohlik/mcp.ts`
+fetches the Rohlik category, **defensively** (the exact tool/shape is not yet
+confirmed against a live account, like `fetch_orders` was):
+
+- Tries a **batch** tool first (arg keys `product_ids` → `productIds` → `ids`);
+  else falls back to per-product `get_product_details` (`productId` →
+  `product_id` → `id`), **sequential and bounded by `MCP_CATEGORY_MAX`** per run.
+- Expects `categories: [{ level, name, id }]` → uses the **level-1 name** as the
+  category and joins names with ` > ` for the path; tolerates a plain string.
+- Returns a raw **`productSample`** (first record) that the admin surfaces under
+  **Run categorization** so the real field names can be confirmed and the
+  extractor hardened if they differ. Nothing is persisted when no category is
+  extracted.
+
 ## Useful tools for Phase 2 _(assumed shapes — verify before relying on them)_
 - `get_typical_order` — your habitual basket → predict needs.
 - `analyze_spending` — spending breakdown over time.
@@ -198,3 +236,10 @@ We call `{ limit: 5 }` and pick the order with the newest `orderTime`.
 - `batch_search_products` + `add_items_to_cart` + `get_checkout`/`submit_checkout`
   — build and place a new order programmatically.
 - `fetch_orders` with `date_from`/`date_to` — the 6-month history scan.
+
+## Document version
+
+This doc tracks live findings against the Rohlik MCP server and is current as of
+**Spajz v0.2.1** (Phase 2.1). The authoritative version history is
+[`CHANGELOG.md`](../CHANGELOG.md); update both in the same commit when MCP
+behaviour or the integration changes.

@@ -1,9 +1,10 @@
-# Spajz
+# Spajz · v0.2.1
 
 A home pantry tracker that talks to the [Rohlik](https://www.rohlik.cz) grocery
 store's MCP server. Connect your Rohlik account, import your order history, and
-Spajz tracks what you have — aggregated by **category** (so "eggs" counts across
-brands) — in a Neon Postgres database.
+Spajz tracks what you have — grouped by **category** (so "eggs" counts across
+brands) — in a Neon Postgres database. See [`CHANGELOG.md`](CHANGELOG.md) for
+version history.
 
 > Vision (Phase 3, documented not built): compute per-category consumption from
 > ~6 months of history, subtract it from the pantry on a schedule, and propose a
@@ -21,8 +22,26 @@ brands) — in a Neon Postgres database.
    imports the last 1 or 6 months. Each calls `fetch_orders` and persists orders,
    line items, products and **price history** to Neon (idempotent: re-imports are
    deduped).
-3. **Pantry** — products roll up into categories; the pantry shows totals per
-   category. With AI enabled, new products are auto-categorized.
+3. **Pantry** — the dashboard lists **individual products grouped by category**.
+   Each product shows either a **package count** or a **parsed content amount**
+   (e.g. grams/ml/pcs) — switchable in the admin.
+
+### Categories
+
+Each product carries two categories: the **Rohlik (MCP) category** fetched from
+Rohlik, and an **AI category**. The AI category is primary; the Rohlik category
+is fed to the AI as a hint and used as the **fallback** when AI is off or
+unavailable (so products still group sensibly). Run categorization automatically
+after an import, or on demand from **/admin → Categorization**.
+
+### Quantity modes
+
+`pantryQuantityMode` (set in **/admin → AI**) chooses how amounts are shown:
+
+- `package` — count of boxes/packages bought.
+- `content` — the package size parsed from Rohlik's `textualAmount` (e.g. `0,75 l`
+  → 750 ml, `1 kg` → 1000 g, `6 ks` → 6 pcs). Lines that can't be parsed still
+  count in `package` mode.
 
 ## Stack
 
@@ -59,7 +78,12 @@ npm run dev                  # http://localhost:3000
 
 - **Database** — see applied vs. defined migrations, **Apply migrations** button,
   table row counts.
-- **AI** — toggles for categorization + parse-fallback, model dropdown.
+- **AI** — toggles for categorization + parse-fallback, model dropdown, and the
+  **pantry quantity display** mode (`package` / `content`).
+- **Categorization** — **Run categorization**: fetch Rohlik categories for a
+  connected session and AI-categorize every product that doesn't have a category
+  yet. Safe to run repeatedly; shows tallies, errors, and a Rohlik product debug
+  sample.
 - **Imports** — Import last / 1 month / 6 months (needs a connected Rohlik
   session), with an **import log** (counts + error messages).
 - **Danger zone** — delete orders, or everything.
@@ -72,7 +96,9 @@ npm run db:migrate    # apply via CLI (needs DATABASE_URL); /admin does the same
 ```
 
 Schema (`src/lib/schema.ts`): `categories`, `products`, `price_history`, `orders`,
-`order_items`, `pantry_items`, `settings`, `import_logs`.
+`order_items`, `pantry_items`, `settings`, `import_logs`. There are two
+migrations: `0000` (initial schema) and `0001` (adds `products.mcp_category`,
+`products.mcp_category_path`, and `settings.pantry_quantity_mode`).
 
 ## Deploy to Vercel
 
@@ -96,7 +122,9 @@ Live import (Rohlik), the database, and AI need real `DATABASE_URL` /
 ## Long-running imports (Vercel)
 
 A 6-month import is a single `fetch_orders` call (items embedded) + DB writes +
-AI categorization of new products. The import route sets `maxDuration: 300`
-(Hobby caps at 60). AI categorization is batched and only runs for new products;
-imports are dedup-resumable, so re-running converges. If a single 6-month call
-still exceeds limits, import in monthly chunks.
+categorization. Categorization runs after ingest: it fetches Rohlik categories
+(bounded per run by `MCP_CATEGORY_MAX`) and AI-categorizes pending products in
+batches. The import route sets `maxDuration: 300` (Hobby caps at 60). Imports are
+dedup-resumable and categorization only touches products that still need it, so
+re-running converges and drains the backlog. If a single 6-month call still
+exceeds limits, import in monthly chunks.

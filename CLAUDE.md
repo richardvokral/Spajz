@@ -60,6 +60,22 @@ For multi-step tasks, state a brief plan:
 
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
 
+## 5. Docs & Versioning
+
+**Important changes ship with their docs. Keep one versioned changelog.**
+
+An important change is anything user-facing or behavioral: a new feature, a
+schema/migration, an API/route change, or a new external dependency. For these:
+
+- In the **same commit**, add a `CHANGELOG.md` entry under a new (or `Unreleased`)
+  SemVer heading **and** update the affected docs (`README.md`, `docs/**`).
+- When cutting a version, bump `package.json` `version` to match the changelog
+  heading. Versions follow [SemVer](https://semver.org); the heading and
+  `package.json` stay in sync.
+
+Trivial changes (typos, formatting, internal refactors with no behavior change)
+don't need a changelog entry — use judgment, consistent with §2 and §3.
+
 ---
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
