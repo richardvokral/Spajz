@@ -69,6 +69,9 @@ schema/migration, an API/route change, or a new external dependency. For these:
 
 - In the **same commit**, add a `CHANGELOG.md` entry under a new (or `Unreleased`)
   SemVer heading **and** update the affected docs (`README.md`, `docs/**`).
+- **Always commit *and* push** the docs/changelog together with the change —
+  never leave docs trailing in a later commit. The default deploy/push branch is
+  `main`.
 - When cutting a version, bump `package.json` `version` to match the changelog
   heading. Versions follow [SemVer](https://semver.org); the heading and
   `package.json` stay in sync.

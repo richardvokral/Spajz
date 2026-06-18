@@ -6,6 +6,12 @@ All notable changes to Spajz are recorded here. The format follows
 with the build phases (`0.1.0` MVP → `0.2.0` Phase 2 → `0.2.1` Phase 2.1). The
 version in `package.json` tracks the latest released heading here.
 
+## [Unreleased]
+
+### Changed
+- Docs policy: doc/changelog updates are always committed **and pushed** together
+  with the change; `main` is the default deploy/push branch (see `CLAUDE.md` §5).
+
 ## [0.2.1] - 2026-06-18 — Phase 2.1
 
 ### Added
