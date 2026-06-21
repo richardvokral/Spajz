@@ -32,13 +32,19 @@ export async function POST(req: Request) {
         productId: pantryStock.productId,
         label: pantryStock.label,
         baseQuantity: pantryStock.baseQuantity,
+        manualRatePerDay: pantryStock.manualRatePerDay,
         stockedAt: pantryStock.stockedAt,
       })
       .from(pantryStock);
 
     const now = new Date();
     const snapshot = rows.map((r) => {
-      const ratePerDay = r.productId ? rates.get(r.productId)?.ratePerDay ?? 0 : 0;
+      const ratePerDay =
+        r.manualRatePerDay != null
+          ? Number(r.manualRatePerDay)
+          : r.productId
+            ? rates.get(r.productId)?.ratePerDay ?? 0
+            : 0;
       const { remaining } = project(
         Number(r.baseQuantity ?? 0),
         new Date(r.stockedAt),

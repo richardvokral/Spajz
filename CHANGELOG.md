@@ -4,8 +4,32 @@ All notable changes to Spajz are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are aligned
 with the build phases (`0.1.0` MVP → `0.2.0` Phase 2 → `0.2.1` Phase 2.1 →
-`0.3.0` Phase 3a → `0.4.0` Phase 3b). The version in `package.json` tracks the
-latest released heading here.
+`0.3.0` Phase 3a → `0.4.0` Phase 3b → `0.5.0` Phase 3c). The version in
+`package.json` tracks the latest released heading here.
+
+## [0.5.0] - 2026-06-21 — Phase 3c (pantry editing, needed flags, grouping)
+
+### Added
+- **Group the pantry by category** — items are grouped under their AI category
+  (Rohlik category, then "Uncategorized" / "Other" for free-text items), each group
+  sorted with the soonest-to-run-out on top.
+- **Adjust an item** inline (✎) — set the current **quantity** and/or a **manual
+  usage rate** (uses/week). A manual rate overrides the 6-month history estimate
+  (shown as "manual") until you clear it; any edit re-anchors the decay clock.
+- **"Needed" hearts** (♥) — mark items, and whole AI categories, as staples you want
+  to keep stocked. Stored now as groundwork for the future buy-suggestion step (no
+  buy list yet; deleting a hearted item simply removes it).
+- New `PATCH /api/pantry/stock/[id]` (quantity / rate / needed) and
+  `PATCH /api/categories/[id]` (needed). New columns `pantry_stock.needed`,
+  `pantry_stock.manual_rate_per_day`, `categories.needed`.
+
+### Changed
+- `GET /api/pantry/stock` now returns category **groups** (was a flat item list).
+- "Stock from last purchase" and the daily snapshot respect a set manual rate.
+
+### Migrations
+- `0003_nosy_marvex.sql` — adds `pantry_stock.needed`,
+  `pantry_stock.manual_rate_per_day`, and `categories.needed`.
 
 ## [0.4.0] - 2026-06-21 — Phase 3b (pantry stock tracking)
 

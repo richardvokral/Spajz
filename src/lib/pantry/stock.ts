@@ -121,6 +121,7 @@ export async function restockProduct(
       baseQuantity: pantryStock.baseQuantity,
       stockedAt: pantryStock.stockedAt,
       unit: pantryStock.unit,
+      manualRatePerDay: pantryStock.manualRatePerDay,
     })
     .from(pantryStock)
     .where(eq(pantryStock.productId, opts.productId));
@@ -128,10 +129,13 @@ export async function restockProduct(
 
   let newBase = opts.addQuantity;
   if (prev) {
+    // A manual rate override (kept on restock) takes precedence over history.
+    const effectiveRate =
+      prev.manualRatePerDay != null ? Number(prev.manualRatePerDay) : opts.ratePerDay;
     const { remaining } = project(
       Number(prev.baseQuantity ?? 0),
       new Date(prev.stockedAt),
-      opts.ratePerDay,
+      effectiveRate,
       now
     );
     newBase = remaining + opts.addQuantity;

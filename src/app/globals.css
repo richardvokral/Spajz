@@ -191,3 +191,16 @@ td.num {
   color: var(--accent-fg);
   border-color: var(--accent);
 }
+
+.heart {
+  border: none;
+  background: none;
+  padding: 0.1rem 0.3rem;
+  font-size: 1rem;
+  line-height: 1;
+  color: var(--muted);
+}
+
+.heart.on {
+  color: var(--danger);
+}

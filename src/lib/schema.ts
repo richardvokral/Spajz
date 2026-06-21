@@ -20,6 +20,7 @@ export const categories = pgTable("categories", {
   id: uuid("id").defaultRandom().primaryKey(),
   name: text("name").notNull().unique(),
   slug: text("slug").notNull().unique(),
+  needed: boolean("needed").default(false).notNull(),
   createdAt: ts("created_at").defaultNow().notNull(),
 });
 
@@ -103,6 +104,10 @@ export const pantryStock = pgTable("pantry_stock", {
   label: text("label"),
   baseQuantity: numeric("base_quantity").default("0").notNull(),
   unit: text("unit"),
+  // When set, overrides the history-derived consumption rate (packages/day).
+  manualRatePerDay: numeric("manual_rate_per_day"),
+  // "Needed" staple flag — surfaced as a heart; groundwork for buy suggestions.
+  needed: boolean("needed").default(false).notNull(),
   stockedAt: ts("stocked_at").defaultNow().notNull(),
   createdAt: ts("created_at").defaultNow().notNull(),
   updatedAt: ts("updated_at").defaultNow().notNull(),

@@ -1,4 +1,4 @@
-# Spajz · v0.4.0
+# Spajz · v0.5.0
 
 A home pantry tracker that talks to the [Rohlik](https://www.rohlik.cz) grocery
 store's MCP server. Connect your Rohlik account, import your order history, and
@@ -22,15 +22,17 @@ Spajz tracks **what you have at home and how long it should last** — estimated
    imports the last 1 or 6 months. Each calls `fetch_orders` and persists orders,
    line items, products and **price history** to Neon (idempotent: re-imports are
    deduped).
-3. **Pantry** (`/`, the home page) — tracks what you have **per product**: estimated
-   **remaining** packages (plus a parsed content amount like grams/ml when
-   available), a weekly **consumption rate**, and **days until empty**, sorted with
-   the soonest-to-run-out on top. Remaining is computed on read as
+3. **Pantry** (`/`, the home page) — tracks what you have **per product, grouped by
+   category**: estimated **remaining** packages (plus a parsed content amount like
+   grams/ml when available), a weekly **consumption rate**, and **days until empty**,
+   sorted with the soonest-to-run-out on top. Remaining is computed on read as
    `base − rate × days_since_stocked`; the rate comes from the **last 6 months** of
-   orders. Hit **Stock from last purchase** after an import to add the latest order's
-   items, or **Add item** to add one from your products, as free text, or from a past
-   purchase. An optional admin toggle records daily snapshots via a
-   `CRON_SECRET`-guarded `POST /api/cron/pantry-snapshot` (the live pantry doesn't
+   orders, or a **manual rate** you set per item. **Adjust** any row inline (quantity
+   and/or rate), and mark items or whole categories as **needed** (♥) — groundwork for
+   the future buy suggestions. Hit **Stock from last purchase** after an import to add
+   the latest order's items, or **Add item** to add one from your products, as free
+   text, or from a past purchase. An optional admin toggle records daily snapshots via
+   a `CRON_SECRET`-guarded `POST /api/cron/pantry-snapshot` (the live pantry doesn't
    need it).
 4. **Insights** — the dashboard also shows headline stats (average purchase,
    total purchases, total spent, favourite weekday) and mobile-first responsive

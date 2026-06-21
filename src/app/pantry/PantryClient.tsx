@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 
 interface StockItem {
   id: string;
@@ -12,9 +12,18 @@ interface StockItem {
   remainingContent: number | null;
   contentUnit: string | null;
   ratePerWeek: number;
+  manual: boolean;
+  needed: boolean;
   daysUntilEmpty: number | null;
   stockedAt: string;
   lastBought: string | null;
+}
+
+interface PantryGroup {
+  category: string;
+  categoryId: string | null;
+  needed: boolean;
+  items: StockItem[];
 }
 
 interface ProductOption {
@@ -40,6 +49,13 @@ const post = (url: string, body?: unknown) =>
     body: body ? JSON.stringify(body) : undefined,
   });
 
+const patch = (url: string, body: unknown) =>
+  fetch(url, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
 function remainingLabel(it: StockItem): string {
   const pkg = `${it.remaining} ${it.unit ?? "pkg"}`;
   return it.remainingContent != null
@@ -54,11 +70,16 @@ export default function PantryClient({
   logtoOn: boolean;
   userName: string | null;
 }) {
-  const [items, setItems] = useState<StockItem[]>([]);
+  const [groups, setGroups] = useState<PantryGroup[]>([]);
   const [ready, setReady] = useState(false);
   const [dbConfigured, setDbConfigured] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+
+  // inline row editor
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editQty, setEditQty] = useState("");
+  const [editRate, setEditRate] = useState("");
 
   // add modal
   const [modalOpen, setModalOpen] = useState(false);
@@ -77,9 +98,9 @@ export default function PantryClient({
       const res = await fetch("/api/pantry/stock");
       const data = await res.json();
       setDbConfigured(Boolean(data.dbConfigured));
-      setItems(Array.isArray(data.items) ? data.items : []);
+      setGroups(Array.isArray(data.groups) ? data.groups : []);
     } catch {
-      setItems([]);
+      setGroups([]);
     } finally {
       setReady(true);
     }
@@ -157,6 +178,30 @@ export default function PantryClient({
     }
   }
 
+  function startEdit(it: StockItem) {
+    setEditingId(it.id);
+    setEditQty(String(it.remaining));
+    setEditRate(it.manual ? String(it.ratePerWeek) : "");
+  }
+
+  function saveEdit(it: StockItem) {
+    const body: { quantity?: number; ratePerWeek?: number | null } = {};
+    if (editQty.trim() !== "") {
+      const q = Number(editQty);
+      if (!Number.isFinite(q) || q < 0) return;
+      body.quantity = q;
+    }
+    if (editRate.trim() === "") {
+      body.ratePerWeek = null;
+    } else {
+      const r = Number(editRate);
+      if (!Number.isFinite(r) || r < 0) return;
+      body.ratePerWeek = r;
+    }
+    setEditingId(null);
+    run("Update item", () => patch(`/api/pantry/stock/${it.id}`, body));
+  }
+
   function submitAdd() {
     const quantity = Number(qty);
     if (mode === "product") {
@@ -191,6 +236,8 @@ export default function PantryClient({
     }
   }
 
+  const empty = ready && groups.length === 0;
+
   return (
     <main>
       <header style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
@@ -211,7 +258,7 @@ export default function PantryClient({
       </header>
       <p className="muted">
         What you have at home and how long it should last, estimated from your buying
-        history over the last 6 months.
+        history over the last 6 months. ♥ marks staples you want to keep stocked.
       </p>
 
       <div className="row" style={{ marginTop: "1rem" }}>
@@ -240,59 +287,156 @@ export default function PantryClient({
 
       {!ready ? (
         <p className="muted">Loading…</p>
-      ) : items.length === 0 ? (
+      ) : empty ? (
         <p className="muted" style={{ marginTop: "1rem" }}>
           Your pantry is empty. Import an order on the <a href="/dashboard">dashboard</a>{" "}
           (or the <a href="/admin">admin</a>), then <strong>Stock from last purchase</strong>,
           or <strong>Add item</strong> manually.
         </p>
       ) : (
-        <div className="card" style={{ marginTop: "1rem", overflowX: "auto" }}>
-          <table>
-            <thead>
-              <tr>
-                <th>Item</th>
-                <th className="num">Remaining</th>
-                <th className="num">Rate / wk</th>
-                <th className="num">Days left</th>
-                <th>Stocked</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((it) => {
-                const low = it.daysUntilEmpty != null && it.daysUntilEmpty < 7;
-                return (
-                  <tr key={it.id}>
-                    <td>{it.name}</td>
-                    <td className="num">{remainingLabel(it)}</td>
-                    <td className="num">{it.ratePerWeek > 0 ? it.ratePerWeek : "—"}</td>
-                    <td className={low ? "num error" : "num"}>
-                      {it.daysUntilEmpty != null ? `${it.daysUntilEmpty}d` : "—"}
-                    </td>
-                    <td className="muted" style={{ fontSize: "0.75rem" }}>
-                      {new Date(it.stockedAt).toLocaleDateString()}
-                    </td>
-                    <td className="num">
-                      <button
-                        disabled={busy !== null}
-                        onClick={() => {
-                          if (confirm(`Remove ${it.name} from pantry?`))
-                            run("Delete", () =>
-                              fetch(`/api/pantry/stock/${it.id}`, { method: "DELETE" })
-                            );
-                        }}
-                        style={{ padding: "0.2rem 0.5rem", fontSize: "0.8rem" }}
-                      >
-                        ✕
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        groups.map((g) => (
+          <div className="card" key={g.category} style={{ marginTop: "1rem", overflowX: "auto" }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: "0.5rem" }}>
+              <h3 style={{ margin: 0, fontSize: "1.05rem" }}>{g.category}</h3>
+              {g.categoryId && (
+                <button
+                  className={g.needed ? "heart on" : "heart"}
+                  disabled={busy !== null}
+                  title={g.needed ? "Needed — click to unmark" : "Mark category as needed"}
+                  onClick={() =>
+                    run("Update category", () =>
+                      patch(`/api/categories/${g.categoryId}`, { needed: !g.needed })
+                    )
+                  }
+                >
+                  {g.needed ? "♥" : "♡"}
+                </button>
+              )}
+            </div>
+            <table style={{ marginTop: "0.5rem" }}>
+              <thead>
+                <tr>
+                  <th>Item</th>
+                  <th className="num">Remaining</th>
+                  <th className="num">Rate / wk</th>
+                  <th className="num">Days left</th>
+                  <th>Stocked</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {g.items.map((it) => {
+                  const low = it.daysUntilEmpty != null && it.daysUntilEmpty < 7;
+                  return (
+                    <Fragment key={it.id}>
+                      <tr>
+                        <td>
+                          {it.name}
+                          {it.needed && <span className="heart on"> ♥</span>}
+                        </td>
+                        <td className="num">{remainingLabel(it)}</td>
+                        <td className="num">
+                          {it.ratePerWeek > 0 ? it.ratePerWeek : "—"}
+                          {it.manual && (
+                            <span className="muted" style={{ fontSize: "0.7rem" }}>
+                              {" "}
+                              manual
+                            </span>
+                          )}
+                        </td>
+                        <td className={low ? "num error" : "num"}>
+                          {it.daysUntilEmpty != null ? `${it.daysUntilEmpty}d` : "—"}
+                        </td>
+                        <td className="muted" style={{ fontSize: "0.75rem" }}>
+                          {new Date(it.stockedAt).toLocaleDateString()}
+                        </td>
+                        <td className="num" style={{ whiteSpace: "nowrap" }}>
+                          <button
+                            className={it.needed ? "heart on" : "heart"}
+                            disabled={busy !== null}
+                            title={it.needed ? "Needed — click to unmark" : "Mark as needed"}
+                            onClick={() =>
+                              run("Update item", () =>
+                                patch(`/api/pantry/stock/${it.id}`, { needed: !it.needed })
+                              )
+                            }
+                          >
+                            {it.needed ? "♥" : "♡"}
+                          </button>
+                          <button
+                            disabled={busy !== null}
+                            title="Adjust quantity / rate"
+                            onClick={() => (editingId === it.id ? setEditingId(null) : startEdit(it))}
+                            style={{ padding: "0.2rem 0.45rem", fontSize: "0.8rem" }}
+                          >
+                            ✎
+                          </button>
+                          <button
+                            disabled={busy !== null}
+                            title="Remove"
+                            onClick={() => {
+                              if (confirm(`Remove ${it.name} from pantry?`))
+                                run("Delete", () =>
+                                  fetch(`/api/pantry/stock/${it.id}`, { method: "DELETE" })
+                                );
+                            }}
+                            style={{ padding: "0.2rem 0.45rem", fontSize: "0.8rem" }}
+                          >
+                            ✕
+                          </button>
+                        </td>
+                      </tr>
+                      {editingId === it.id && (
+                        <tr>
+                          <td colSpan={6}>
+                            <div className="row" style={{ alignItems: "flex-end" }}>
+                              <div style={{ flex: "0 1 130px" }}>
+                                <label htmlFor={`q-${it.id}`}>Quantity</label>
+                                <input
+                                  id={`q-${it.id}`}
+                                  type="number"
+                                  min="0"
+                                  step="any"
+                                  value={editQty}
+                                  onChange={(e) => setEditQty(e.target.value)}
+                                />
+                              </div>
+                              <div style={{ flex: "0 1 160px" }}>
+                                <label htmlFor={`r-${it.id}`}>Uses / week</label>
+                                <input
+                                  id={`r-${it.id}`}
+                                  type="number"
+                                  min="0"
+                                  step="any"
+                                  value={editRate}
+                                  onChange={(e) => setEditRate(e.target.value)}
+                                  placeholder={`auto: ${it.ratePerWeek}`}
+                                />
+                              </div>
+                              <button
+                                className="primary"
+                                disabled={busy !== null}
+                                onClick={() => saveEdit(it)}
+                              >
+                                Save
+                              </button>
+                              <button disabled={busy !== null} onClick={() => setEditingId(null)}>
+                                Cancel
+                              </button>
+                            </div>
+                            <p className="muted" style={{ fontSize: "0.75rem", margin: "0.4rem 0 0" }}>
+                              Leave <em>Uses / week</em> empty to use the history estimate.
+                            </p>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ))
       )}
 
       {modalOpen && (
@@ -416,7 +560,8 @@ export default function PantryClient({
                   placeholder="e.g. bottle, kg"
                 />
                 <p className="muted" style={{ fontSize: "0.8rem" }}>
-                  Free-text items have no buying history, so they stay put (no daily estimate).
+                  Free-text items have no buying history, so they stay put (no daily estimate)
+                  unless you set a rate.
                 </p>
               </div>
             )}
