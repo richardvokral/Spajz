@@ -71,9 +71,11 @@ export default function AskClient() {
     <main>
       <header style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
         <h1>Ask my pantry</h1>
-        <a href="/dashboard" className="muted" style={{ fontSize: "0.85rem" }}>
-          ← Dashboard
-        </a>
+        <span className="muted" style={{ fontSize: "0.85rem" }}>
+          <a href="/pantry">Pantry</a>
+          {" · "}
+          <a href="/dashboard">Dashboard</a>
+        </span>
       </header>
       <p className="muted">
         Ask a question about your orders in plain language. The AI writes a read-only query,

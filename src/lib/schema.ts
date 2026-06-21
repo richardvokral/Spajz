@@ -90,6 +90,38 @@ export const pantryItems = pgTable("pantry_items", {
   updatedAt: ts("updated_at").defaultNow().notNull(),
 });
 
+// Per-PRODUCT pantry stock (Phase 3b). Stores only the anchor: the base quantity
+// at the moment it was stocked plus when. Remaining and the consumption rate are
+// computed on read from order history, so no nightly job is needed. Product rows
+// have a UNIQUE product_id (restock re-anchors the same row); free-text rows have
+// product_id NULL + a label (multiple NULLs don't collide in Postgres).
+export const pantryStock = pgTable("pantry_stock", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  productId: uuid("product_id")
+    .references(() => products.id, { onDelete: "cascade" })
+    .unique(),
+  label: text("label"),
+  baseQuantity: numeric("base_quantity").default("0").notNull(),
+  unit: text("unit"),
+  stockedAt: ts("stocked_at").defaultNow().notNull(),
+  createdAt: ts("created_at").defaultNow().notNull(),
+  updatedAt: ts("updated_at").defaultNow().notNull(),
+});
+
+// Optional daily snapshot of computed remaining (Phase 3b). Written only when the
+// admin toggle `pantry_snapshot_enabled` is on and the cron/webhook endpoint runs;
+// the live pantry never reads this. Kept for history and the future buy-suggestion.
+export const pantrySnapshots = pgTable("pantry_snapshots", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  snapshotDate: ts("snapshot_date").defaultNow().notNull(),
+  productId: uuid("product_id").references(() => products.id, {
+    onDelete: "cascade",
+  }),
+  label: text("label"),
+  remainingPackages: numeric("remaining_packages"),
+  createdAt: ts("created_at").defaultNow().notNull(),
+});
+
 // Single-row app settings (always id = 1).
 export const settings = pgTable("settings", {
   id: integer("id").primaryKey().default(1),
@@ -101,6 +133,9 @@ export const settings = pgTable("settings", {
     .notNull(),
   aiModel: text("ai_model").default("claude-opus-4-8").notNull(),
   pantryQuantityMode: text("pantry_quantity_mode").default("package").notNull(),
+  pantrySnapshotEnabled: boolean("pantry_snapshot_enabled")
+    .default(false)
+    .notNull(),
   updatedAt: ts("updated_at").defaultNow().notNull(),
 });
 

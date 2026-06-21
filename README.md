@@ -1,15 +1,15 @@
-# Spajz · v0.3.0
+# Spajz · v0.4.0
 
 A home pantry tracker that talks to the [Rohlik](https://www.rohlik.cz) grocery
 store's MCP server. Connect your Rohlik account, import your order history, and
-Spajz tracks what you have — grouped by **category** (so "eggs" counts across
-brands) — in a Neon Postgres database. See [`CHANGELOG.md`](CHANGELOG.md) for
-version history.
+Spajz tracks **what you have at home and how long it should last** — estimated
+**per product** from how often you buy it — in a Neon Postgres database. The
+**pantry is the home page** (`/`); the spending/insights graphs live at
+`/dashboard`. See [`CHANGELOG.md`](CHANGELOG.md) for version history.
 
-> Vision (Phase 3, documented not built): compute per-category consumption from
-> ~6 months of history, subtract it from the pantry on a schedule, and propose a
-> ready-to-place shopping cart via MCP. Plus: ingest paper invoices from other
-> shops via a multimodal LLM.
+> Vision (next, documented not built): use each item's **days until empty** to
+> propose a ready-to-place shopping cart via MCP. Plus: ingest paper invoices from
+> other shops via a multimodal LLM.
 
 ## How it works
 
@@ -22,9 +22,16 @@ version history.
    imports the last 1 or 6 months. Each calls `fetch_orders` and persists orders,
    line items, products and **price history** to Neon (idempotent: re-imports are
    deduped).
-3. **Pantry** — the dashboard lists **individual products grouped by category**.
-   Each product shows either a **package count** or a **parsed content amount**
-   (e.g. grams/ml/pcs) — switchable in the admin.
+3. **Pantry** (`/`, the home page) — tracks what you have **per product**: estimated
+   **remaining** packages (plus a parsed content amount like grams/ml when
+   available), a weekly **consumption rate**, and **days until empty**, sorted with
+   the soonest-to-run-out on top. Remaining is computed on read as
+   `base − rate × days_since_stocked`; the rate comes from the **last 6 months** of
+   orders. Hit **Stock from last purchase** after an import to add the latest order's
+   items, or **Add item** to add one from your products, as free text, or from a past
+   purchase. An optional admin toggle records daily snapshots via a
+   `CRON_SECRET`-guarded `POST /api/cron/pantry-snapshot` (the live pantry doesn't
+   need it).
 4. **Insights** — the dashboard also shows headline stats (average purchase,
    total purchases, total spent, favourite weekday) and mobile-first responsive
    charts: spending and purchases per month (last 6 months) and purchases by

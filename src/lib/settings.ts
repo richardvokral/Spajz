@@ -9,6 +9,7 @@ export interface AppSettings {
   aiParseFallbackEnabled: boolean;
   aiModel: string;
   pantryQuantityMode: PantryQuantityMode;
+  pantrySnapshotEnabled: boolean;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -16,6 +17,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   aiParseFallbackEnabled: false,
   aiModel: "claude-opus-4-8",
   pantryQuantityMode: "package",
+  pantrySnapshotEnabled: false,
 };
 
 export const AI_MODELS = [
@@ -36,6 +38,7 @@ export async function getSettings(): Promise<AppSettings> {
     aiParseFallbackEnabled: row.aiParseFallbackEnabled,
     aiModel: row.aiModel,
     pantryQuantityMode: (row.pantryQuantityMode as PantryQuantityMode) ?? "package",
+    pantrySnapshotEnabled: row.pantrySnapshotEnabled ?? false,
   };
 }
 

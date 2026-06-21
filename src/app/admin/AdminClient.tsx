@@ -26,6 +26,7 @@ interface Status {
     aiParseFallbackEnabled: boolean;
     aiModel: string;
     pantryQuantityMode: string;
+    pantrySnapshotEnabled: boolean;
   } | null;
   importLogs: ImportLogRow[];
 }
@@ -43,6 +44,7 @@ export default function AdminClient() {
   const [aiParse, setAiParse] = useState(false);
   const [model, setModel] = useState("claude-opus-4-8");
   const [qtyMode, setQtyMode] = useState("package");
+  const [snapEnabled, setSnapEnabled] = useState(false);
 
   const load = useCallback(async () => {
     const res = await fetch("/api/admin/status");
@@ -53,6 +55,7 @@ export default function AdminClient() {
       setAiParse(data.settings.aiParseFallbackEnabled);
       setModel(data.settings.aiModel);
       setQtyMode(data.settings.pantryQuantityMode ?? "package");
+      setSnapEnabled(data.settings.pantrySnapshotEnabled ?? false);
     }
   }, []);
 
@@ -107,9 +110,11 @@ export default function AdminClient() {
     <main>
       <header style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
         <h1>Spajz admin</h1>
-        <a href="/dashboard" className="muted" style={{ fontSize: "0.85rem" }}>
-          ← Dashboard
-        </a>
+        <span className="muted" style={{ fontSize: "0.85rem" }}>
+          <a href="/pantry">Pantry</a>
+          {" · "}
+          <a href="/dashboard">Dashboard</a>
+        </span>
       </header>
 
       {msg && <p className="notice">{msg}</p>}
@@ -191,6 +196,15 @@ export default function AdminClient() {
           <option value="package">Per package (count of boxes)</option>
           <option value="content">By content amount (parsed size)</option>
         </select>
+        <label style={{ marginTop: "0.75rem" }}>
+          <input
+            type="checkbox"
+            checked={snapEnabled}
+            onChange={(e) => setSnapEnabled(e.target.checked)}
+          />{" "}
+          Enable daily pantry snapshots (cron) — records remaining levels for history;
+          the live pantry doesn&apos;t need it
+        </label>
         <div style={{ marginTop: "0.75rem" }}>
           <button
             className="primary"
@@ -202,6 +216,7 @@ export default function AdminClient() {
                   aiParseFallbackEnabled: aiParse,
                   aiModel: model,
                   pantryQuantityMode: qtyMode,
+                  pantrySnapshotEnabled: snapEnabled,
                 })
               )
             }

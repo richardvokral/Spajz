@@ -4,8 +4,43 @@ All notable changes to Spajz are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are aligned
 with the build phases (`0.1.0` MVP → `0.2.0` Phase 2 → `0.2.1` Phase 2.1 →
-`0.3.0` Phase 3a). The version in `package.json` tracks the latest released
-heading here.
+`0.3.0` Phase 3a → `0.4.0` Phase 3b). The version in `package.json` tracks the
+latest released heading here.
+
+## [0.4.0] - 2026-06-21 — Phase 3b (pantry stock tracking)
+
+### Added
+- **Pantry stock tracking** — Spajz now tracks what you actually have at home, per
+  **product**. Each item shows estimated **remaining** packages (plus a parsed
+  content amount, e.g. grams/ml, when available), a weekly **consumption rate**,
+  and **days until empty**, sorted so the soonest-to-run-out is on top. Remaining is
+  computed **on read** as `base − rate × days_since_stocked` — no nightly job needed.
+- The **consumption rate** is derived from the **last 6 months** of orders (quantity
+  bought ÷ days since first purchase in the window, floored at 14 days), in
+  `src/lib/pantry/stock.ts` (reused by every stock route).
+- **Pantry is the home page** (`/` → `/pantry`); the dashboard graphs move to
+  `/dashboard`.
+- **Stock from last purchase** — one button adds the latest order's items onto the
+  pantry (current estimate + purchased qty, decay clock reset).
+- **Manual add & delete** — add an item from your **product database**, as **free
+  text + quantity**, or **from a specific past purchase** (the app's first modal),
+  and delete any row.
+- **Admin toggle** *Enable daily pantry snapshots (cron)* (off by default) plus a
+  prepared, `CRON_SECRET`-guarded `POST /api/cron/pantry-snapshot` endpoint and a
+  Vercel `crons` schedule that records daily remaining levels for history. The live
+  pantry never depends on it.
+- New endpoints: `GET`/`POST /api/pantry/stock`, `DELETE /api/pantry/stock/[id]`,
+  `POST /api/pantry/restock`, `GET /api/products?q=`, `GET /api/orders`,
+  `POST /api/cron/pantry-snapshot`. New tables `pantry_stock` and `pantry_snapshots`,
+  plus `settings.pantry_snapshot_enabled`.
+
+### Changed
+- The dashboard's category pantry list was removed (the new `/pantry` page replaces
+  it); the dashboard keeps Rohlik connect/import and the insights charts.
+
+### Migrations
+- `0002_sturdy_pestilence.sql` — adds `pantry_stock`, `pantry_snapshots`, and
+  `settings.pantry_snapshot_enabled`.
 
 ## [0.3.0] - 2026-06-18 — Phase 3a (dashboard insights + Ask my pantry)
 

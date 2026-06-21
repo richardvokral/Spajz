@@ -15,28 +15,6 @@ interface Metrics {
   byWeekday: { day: string; count: number }[];
 }
 
-interface PantryItem {
-  name: string;
-  mcpCategory: string | null;
-  packageCount: number;
-  contentAmount: number | null;
-  contentUnit: string | null;
-  textualAmount: string | null;
-  unit: string | null;
-  lastBought: string | null;
-}
-
-interface PantryCategory {
-  category: string;
-  packageTotal: number;
-  content: { unit: string; amount: number }[];
-  items: PantryItem[];
-}
-
-function formatContent(content: { unit: string; amount: number }[]): string {
-  return content.map((c) => `${c.amount} ${c.unit}`).join(" · ");
-}
-
 function money(amount: number, currency: string): string {
   return `${Math.round(amount).toLocaleString("en-US")} ${currency}`;
 }
@@ -70,25 +48,7 @@ export default function DashboardClient({
   const [debug, setDebug] = useState<RohlikDebug | null>(null);
   const [copied, setCopied] = useState(false);
 
-  const [pantry, setPantry] = useState<PantryCategory[]>([]);
-  const [mode, setMode] = useState<"package" | "content">("package");
-  const [pantryReady, setPantryReady] = useState(false);
-  const [dbConfigured, setDbConfigured] = useState(true);
   const [metrics, setMetrics] = useState<Metrics | null>(null);
-
-  const loadPantry = useCallback(async () => {
-    try {
-      const res = await fetch("/api/pantry");
-      const data = await res.json();
-      setDbConfigured(Boolean(data.dbConfigured));
-      setPantry(Array.isArray(data.categories) ? data.categories : []);
-      setMode(data.pantryQuantityMode === "content" ? "content" : "package");
-    } catch {
-      setPantry([]);
-    } finally {
-      setPantryReady(true);
-    }
-  }, []);
 
   const loadMetrics = useCallback(async () => {
     try {
@@ -101,9 +61,8 @@ export default function DashboardClient({
   }, []);
 
   useEffect(() => {
-    loadPantry();
     loadMetrics();
-  }, [loadPantry, loadMetrics]);
+  }, [loadMetrics]);
 
   async function handleImport() {
     setLoading(true);
@@ -125,7 +84,7 @@ export default function DashboardClient({
       setNote(
         `Imported ${data.ordersImported} order(s), ${data.itemsImported} item(s).`
       );
-      await Promise.all([loadPantry(), loadMetrics()]);
+      await loadMetrics();
     } catch {
       setError("Network error talking to the server.");
     } finally {
@@ -143,6 +102,8 @@ export default function DashboardClient({
       >
         <h1>Spajz</h1>
         <span className="muted" style={{ fontSize: "0.85rem" }}>
+          <a href="/pantry">Pantry</a>
+          {" · "}
           <a href="/ask">Ask my pantry</a>
           {" · "}
           <a href="/admin">Admin</a>
@@ -316,68 +277,6 @@ export default function DashboardClient({
         </>
       )}
 
-      <h2>Pantry</h2>
-      {!dbConfigured ? (
-        <p className="muted">
-          Database not configured (set <code>DATABASE_URL</code>). The pantry lives in Neon.
-        </p>
-      ) : !pantryReady ? (
-        <p className="muted">Loading…</p>
-      ) : pantry.length === 0 ? (
-        <p className="muted">
-          Your pantry is empty. Connect Rohlik and import an order (or use the{" "}
-          <a href="/admin">admin</a> to import 1–6 months). If you just deployed, apply
-          DB migrations in the admin first.
-        </p>
-      ) : (
-        <>
-          <p className="muted" style={{ fontSize: "0.85rem", marginTop: 0 }}>
-            Showing <strong>{mode === "content" ? "content amount" : "package count"}</strong>{" "}
-            (change in <a href="/admin">admin</a>).
-          </p>
-          {pantry.map((cat) => (
-            <div className="card" key={cat.category} style={{ marginBottom: "0.75rem" }}>
-              <div
-                style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}
-              >
-                <h3 style={{ margin: 0, fontSize: "1.05rem" }}>{cat.category}</h3>
-                <span className="muted" style={{ fontSize: "0.85rem" }}>
-                  {mode === "content" && cat.content.length > 0
-                    ? formatContent(cat.content)
-                    : `${cat.packageTotal} pkg`}
-                </span>
-              </div>
-              <table style={{ marginTop: "0.5rem" }}>
-                <tbody>
-                  {cat.items.map((it, i) => (
-                    <tr key={i}>
-                      <td>
-                        {it.name}
-                        {it.mcpCategory && (
-                          <span className="muted" style={{ fontSize: "0.72rem" }}>
-                            {" "}
-                            · {it.mcpCategory}
-                          </span>
-                        )}
-                      </td>
-                      <td className="num">
-                        {mode === "content" && it.contentAmount != null
-                          ? `${it.contentAmount} ${it.contentUnit}`
-                          : `${it.packageCount} × ${it.textualAmount ?? it.unit ?? "?"}`}
-                      </td>
-                      <td style={{ fontSize: "0.75rem" }} className="muted">
-                        {it.lastBought
-                          ? new Date(it.lastBought).toLocaleDateString()
-                          : ""}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ))}
-        </>
-      )}
     </main>
   );
 }

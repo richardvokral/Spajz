@@ -10,6 +10,7 @@ const Body = z.object({
   aiParseFallbackEnabled: z.boolean().optional(),
   aiModel: z.enum(AI_MODELS).optional(),
   pantryQuantityMode: z.enum(PANTRY_QUANTITY_MODES).optional(),
+  pantrySnapshotEnabled: z.boolean().optional(),
 });
 
 export async function POST(req: Request) {

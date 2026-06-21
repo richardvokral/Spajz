@@ -3,5 +3,8 @@
     "src/app/api/rohlik/last-order/route.ts": {
       "maxDuration": 60
     }
-  }
+  },
+  "crons": [
+    { "path": "/api/cron/pantry-snapshot", "schedule": "0 6 * * *" }
+  ]
 }
